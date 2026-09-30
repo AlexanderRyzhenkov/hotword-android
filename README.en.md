@@ -61,6 +61,16 @@ A collapsible **Local diagnostics** section records only lifecycle events, inclu
 
 **Note:** opt out of overlay access if you do not want a small always-visible status dot over other apps. Without it, Android may block dispatch while Hotword is in the background. Xiaomi 14 lock-screen behavior requires fresh device testing.
 
+## Hotfix 0.3.3: stability
+
+Version 0.3.2 created a real `TYPE_APPLICATION_OVERLAY` window. That window is unnecessary for this use case and may crash on some OEM builds while creating the window context or overlay. Version 0.3.3 **removes the overlay window entirely**.
+
+Android's **Display over other apps** special access remains only as an explicit user-granted permission for background Activity launch eligibility. Android documents `SYSTEM_ALERT_WINDOW` itself as a background-activity-launch exception. The Android 15 rule that additionally requires a *visible overlay window* applies to **starting a foreground service from the background**; Hotword starts its microphone foreground service while its setup Activity is visible.
+
+If the process still crashes, the app now stores only the exception type and the top stack frame in **Local diagnostics**. Reopen the app and use **Copy recent events**. Audio, recognized phrases, and other-app content are never written to diagnostics.
+
+The quicker rearming from 0.3.2 remains: Vosk stays loaded and only microphone capture is temporarily released while the selected assistant is using it.
+
 ## Building
 
 Requires JDK 17, Android SDK 35, and Gradle 8.13. To keep Git lightweight and manage third-party assets, the Russian model ZIP is **not committed**; a build-time script downloads a pinned ZIP, verifies SHA-256, and packages it as an APK asset **on the build machine**. The resulting APK works fully offline.
