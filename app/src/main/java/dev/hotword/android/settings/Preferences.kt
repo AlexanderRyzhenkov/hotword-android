@@ -7,7 +7,7 @@ object Preferences {
     private const val FILE = "hotword_prefs"
     private const val KEY_PHRASE = "phrase"
     private const val KEY_LANGUAGE = "language"
-    const val DEFAULT_PHRASE = "алиса"
+    const val DEFAULT_PHRASE = "привет помощник"
 
     fun phrase(context: Context): String =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
