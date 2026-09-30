@@ -72,6 +72,7 @@ class WakeWordService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_REFRESH_OVERLAY && running) {
             overlay.sync()
+            Diagnostics.record(this, "Overlay window attached: " + overlay.isAttached)
             return START_STICKY
         }
         if (intent?.action == ACTION_RELOAD && running) {
@@ -81,12 +82,14 @@ class WakeWordService : Service() {
         if (running) return START_STICKY
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
             !ModelInstaller.isInstalled(this, ModelLanguage.RUSSIAN)) {
+            Diagnostics.record(this, "Listener not started: microphone permission or model missing")
             stopSelf()
             return START_NOT_STICKY
         }
         try {
             startForeground(NOTIFICATION_ID, notification())
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            Diagnostics.record(this, "Foreground service start rejected: " + error.javaClass.simpleName)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -101,7 +104,7 @@ class WakeWordService : Service() {
             .apply { setReferenceCounted(false) }
         renewCpuLock.run()
         overlay.sync() // Only creates a status dot after explicit user approval.
-        Diagnostics.record(this, "Foreground microphone service started")
+        Diagnostics.record(this, "Foreground microphone service started; overlay attached: " + overlay.isAttached)
         startEngine()
         // A system-managed restart may recover after process eviction, but is not
         // a bypass for force-stop, boot or OEM microphone/background restrictions.
@@ -277,6 +280,7 @@ class WakeWordService : Service() {
     }
 
     override fun onDestroy() {
+        Diagnostics.record(this, "Microphone foreground service stopped")
         running = false
         isActive = false
         suspended = true
