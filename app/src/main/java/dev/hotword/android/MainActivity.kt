@@ -193,10 +193,7 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         updateChecks()
-        if (modelReady) {
-            ensureListening()
-            WakeWordService.refreshOverlay(this)
-        }
+        if (modelReady) ensureListening()
         if (diagnosticsExpanded) refreshDiagnostics.run()
     }
 
