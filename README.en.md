@@ -4,11 +4,26 @@
 
 An experimental open-source Android app that recognizes a **user-defined Russian trigger phrase** offline and attempts to invoke **whichever digital assistant Android has selected by default**. It is not tied to Alice, Gemini, or another assistant vendor.
 
+## Fixes in 0.3.1
+
+## Fixes in 0.3.1
+
+- The app now invokes **only an exported activity belonging to the assistant configured in Android**. It no longer sends ambiguous implicit intents that can trigger an all-assistants chooser on HyperOS. It tries the selected package's `ACTION_ASSIST` handler first and `ACTION_VOICE_COMMAND` only as a fallback within that same package. If no unambiguous public handler exists, it reports an error rather than launching a different assistant.
+- The foreground service now requests `START_STICKY` recovery and holds renewable, bounded `PARTIAL_WAKE_LOCK` leases while active to help keep recognition responsive when the screen is off. **This may significantly increase battery usage.** Neither feature overrides Android or OEM force-stop/background restrictions.
+- Xiaomi 14 screen-off detection was confirmed by a user on version 0.2. Version 0.3.1 still needs device retesting after the assistant-dispatch and service lifecycle changes.
+- Non-privileged apps cannot reproduce SystemUI's privileged assistant gesture exactly. If the configured assistant has no publicly exported activity supporting the relevant intent, an identical voice UI cannot be guaranteed.
+- **Reboot / force stop:** open the app once to resume. Android cannot silently start a microphone foreground service from a background `BOOT_COMPLETED` receiver.
+
+### Troubleshooting
+
+First use the in-app assistant test button to isolate dispatch problems from recognition. Then test with the app in the background and the screen locked. Filter Logcat by `HotwordAssistant` and `HotwordService` for diagnostics. A blocked assistant activity launch is different from a stopped microphone listener.
+
+
 ## Version 0.3 — automatic listening
 
 - The Russian Vosk offline model is **bundled in the final APK**. On first opening, it is unpacked to private storage; no phone-side download or Internet permission is needed.
 - Once the model is prepared and microphone permission granted, listening **starts automatically**. There are no Start/Stop controls. The phrase is saved after a 1.5-second input pause, followed by a short service restart.
-- The app uses `ACTION_VOICE_COMMAND` **only when its handler belongs to the system-selected assistant**; otherwise it falls back to `ACTION_ASSIST`. After a detected phrase, our microphone is released for about 20 seconds so the assistant can listen.
+- Assistant dispatch uses an explicit `ACTION_ASSIST` activity belonging to the selected assistant, with a package-scoped `ACTION_VOICE_COMMAND` fallback. An implicit all-assistants chooser is intentionally never opened. Recognition pauses for about 20 seconds after a trigger.
 - Microphone and notification permissions are checked. The app reports Android's exposed battery optimization and background restrictions, and links to battery settings and compatible Xiaomi/HyperOS autostart settings.
 - The notification shade shows only a minimal persistent microphone-service notification. Android requires it for a long-running microphone foreground service. No per-detection debug notification is posted; error notifications appear only when necessary.
 - On device reboot or app update, a notification (when allowed) reminds the user to open the app and resume listening. Android 14+ prohibits starting a microphone foreground service directly from `BOOT_COMPLETED`.
