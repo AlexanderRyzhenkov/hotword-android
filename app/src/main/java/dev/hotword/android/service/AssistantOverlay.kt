@@ -20,7 +20,12 @@ import android.view.WindowManager
  * this can help on Home / inside other apps but is not a lock-screen guarantee.
  */
 internal class AssistantOverlay(private val context: Context) {
-    private val windowManager = context.getSystemService(WindowManager::class.java)
+    // Since API 30 WindowManager should come from a window context, not
+    // an arbitrary Service/application context (important for Android 15 OEMs).
+    private val windowContext: Context = if (Build.VERSION.SDK_INT >= 30)
+        context.createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+    else context
+    private val windowManager = windowContext.getSystemService(WindowManager::class.java)
     private var dot: View? = null
 
     fun sync() {
@@ -30,7 +35,7 @@ internal class AssistantOverlay(private val context: Context) {
         }
         if (dot != null) return
         val size = (12 * context.resources.displayMetrics.density).toInt().coerceAtLeast(12)
-        val view = View(context).apply {
+        val view = View(windowContext).apply {
             contentDescription = "Hotword active"
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
