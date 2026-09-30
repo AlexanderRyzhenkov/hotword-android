@@ -1,12 +1,10 @@
 package dev.hotword.android.assistant
 
 import android.app.PendingIntent
-import android.app.role.RoleManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.os.Build
 import android.provider.Settings
 
 /** Only invokes the assistant selected by the user in Android settings. */
@@ -17,19 +15,17 @@ object AssistantLauncher {
     }
 
     private fun selectedPackage(context: Context): String? {
-        if (Build.VERSION.SDK_INT >= 29) {
-            val roles = context.getSystemService(RoleManager::class.java)
-            if (roles != null && roles.isRoleAvailable(RoleManager.ROLE_ASSISTANT)) {
-                roles.getRoleHolders(RoleManager.ROLE_ASSISTANT).firstOrNull()?.let { return it }
-            }
-        }
-        val component = Settings.Secure.getString(context.contentResolver, "assistant")
-        ComponentName.unflattenFromString(component ?: "")?.packageName?.let { return it }
+        // Prefer the ACTION_ASSIST target that Android exposes as the active handler.
+        // VoiceInteractionManager's actual active service is a privileged API.
+        val chosen = Settings.Secure.getString(context.contentResolver, "assistant")
+        val chosenPackage = ComponentName.unflattenFromString(chosen ?: "")?.packageName
         @Suppress("DEPRECATION")
         val resolved = context.packageManager.resolveActivity(
             Intent(Intent.ACTION_ASSIST), PackageManager.MATCH_DEFAULT_ONLY
         )
-        return resolved?.activityInfo?.packageName
+        val activityPackage = resolved?.activityInfo?.packageName
+        return if (activityPackage != null && activityPackage != "android" &&
+            activityPackage != "com.android.systemui") activityPackage else chosenPackage
     }
 
     private fun selectedVoiceCommand(context: Context): Intent? {
