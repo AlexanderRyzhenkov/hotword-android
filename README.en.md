@@ -32,7 +32,7 @@ After a successful CI build, download the APK from **Actions → Android CI → 
 - `ACTION_ASSIST` requests the system-selected assistant, but does **not** guarantee that the assistant starts listening or works on a locked screen.
 - The MVP uses continuous **automatic speech recognition (ASR)** with phrase matching rather than a dedicated low-power keyword detector. False positives, missed triggers, out-of-vocabulary words, and significant battery use are possible. Prefer long, distinctive phrases.
 - Listening must be explicitly enabled. Android may prevent microphone service auto-start after reboot or forced termination. OEM battery management may kill the process.
-- Xiaomi 14 compatibility and the initial CI build have **not yet been verified**; this is a test prototype, not a production release.
+- GitHub Actions successfully compiled the debug APK and ran unit tests on 2026-09-30. Background/locked-screen behavior on Xiaomi 14 is **not yet verified on a physical device**; this is a test prototype, not a production release.
 
 ## Architecture
 
