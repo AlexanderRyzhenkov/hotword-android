@@ -8,13 +8,13 @@ import java.util.Locale
 
 /**
  * Minimal local lifecycle diagnostics. Never records audio, text hypotheses,
- * assistant conversations or personal data. Limited to 15 lifecycle events.
+ * assistant conversations or personal data. Limited to 30 lifecycle events.
  */
 object Diagnostics {
     private const val TAG = "Hotword"
     private const val PREFS = "hotword_diagnostics"
     private const val KEY = "recent_events"
-    private const val MAX_LINES = 15
+    private const val MAX_LINES = 30
 
     @Synchronized
     fun record(context: Context, event: String) {
