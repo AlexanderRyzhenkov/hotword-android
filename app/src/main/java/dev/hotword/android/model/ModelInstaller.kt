@@ -1,246 +1,93 @@
 package dev.hotword.android.model
 
 import android.content.Context
-import android.net.Uri
 import dev.hotword.android.settings.ModelLanguage
-import java.io.EOFException
 import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.IOException
-import java.io.InputStream
-import java.net.HttpURLConnection
-import java.net.URL
-import java.security.MessageDigest
 import java.util.zip.ZipInputStream
 
-/** Model downloads are resumable; all archives are checked against pinned SHA-256 hashes. */
+/** Extracts the offline APK-bundled model without network access. */
 object ModelInstaller {
-    private const val MAX_ARCHIVE = 100L * 1024 * 1024
-    private const val MAX_EXTRACTED = 250L * 1024 * 1024
+    private const val MAX_UNPACKED_BYTES = 250L * 1024L * 1024L
+    private const val MAX_ENTRIES = 10_000
     private const val BUFFER_SIZE = 32 * 1024
-    private const val ATTEMPTS_PER_SOURCE = 2
 
     fun destination(context: Context, language: ModelLanguage): File =
-        File(context.filesDir, "models/${language.code}")
+        File(context.filesDir, "models/" + language.code)
 
-    fun isInstalled(context: Context, language: ModelLanguage): Boolean =
-        File(destination(context, language), ".ready").isFile
-
-    /** Called only from a worker thread. Partial downloads survive failure and app restarts. */
-    fun download(context: Context, language: ModelLanguage, onProgress: (String) -> Unit) {
-        if (isInstalled(context, language)) return
-        val archive = partialFile(context, language)
-        if (!checksumMatches(archive, language.sha256)) {
-            val failures = mutableListOf<String>()
-            downloadLoop@ for ((index, source) in language.downloadSources.withIndex()) {
-                for (attempt in 1..ATTEMPTS_PER_SOURCE) {
-                    try {
-                        onProgress("Source ${index + 1}/${language.downloadSources.size}, attempt $attempt/$ATTEMPTS_PER_SOURCE")
-                        fetch(source, archive, onProgress)
-                        onProgress("Verifying model archive…")
-                        if (!checksumMatches(archive, language.sha256)) {
-                            archive.delete() // Never resume from an archive with an incorrect checksum.
-                            throw IOException("Model checksum mismatch")
-                        }
-                        break@downloadLoop
-                    } catch (error: IOException) {
-                        failures.add("${URL(source).host}: ${error.message ?: error.javaClass.simpleName}")
-                        onProgress(if (attempt == ATTEMPTS_PER_SOURCE) "Trying another source…" else "Connection interrupted; retrying…")
-                    }
-                }
-            }
-            if (!checksumMatches(archive, language.sha256)) {
-                throw IOException("All sources failed. ${failures.lastOrNull() ?: "Unknown error"}. " +
-                    "Check your connection or import the model ZIP manually.")
-            }
-        }
-        install(context, language, archive, onProgress)
-        archive.delete()
-    }
-
-    /** Android Storage Access Framework fallback when download servers are unavailable. */
-    fun importArchive(context: Context, language: ModelLanguage, uri: Uri, onProgress: (String) -> Unit) {
-        if (isInstalled(context, language)) return
-        val archive = partialFile(context, language)
-        archive.delete()
-        try {
-            val input = context.contentResolver.openInputStream(uri)
-                ?: throw IOException("Cannot open selected file")
-            input.use { stream ->
-                FileOutputStream(archive).buffered().use { output ->
-                    copyLimited(stream, output, onProgress)
-                }
-            }
-            onProgress("Verifying imported ZIP…")
-            if (!checksumMatches(archive, language.sha256)) {
-                throw IOException("Incorrect or damaged model ZIP (SHA-256 mismatch)")
-            }
-            install(context, language, archive, onProgress)
-        } finally {
-            archive.delete()
-        }
-    }
-
-    private fun partialFile(context: Context, language: ModelLanguage): File {
-        val dir = File(context.filesDir, "models/.downloads")
-        check(dir.isDirectory || dir.mkdirs()) { "Cannot create model download directory" }
-        return File(dir, "${language.code}.zip.part")
-    }
-
-    private fun fetch(source: String, archive: File, onProgress: (String) -> Unit) {
-        val offset = archive.takeIf { it.isFile }?.length() ?: 0L
-        if (offset > MAX_ARCHIVE) {
-            archive.delete()
-            throw IOException("Partial archive exceeds size limit")
-        }
-        val connection = (URL(source).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 60_000 // per stalled read, not a 60-second total download limit
-            instanceFollowRedirects = true
-            setRequestProperty("Accept-Encoding", "identity")
-            if (offset > 0L) setRequestProperty("Range", "bytes=$offset-")
-        }
-        try {
-            val response = connection.responseCode
-            if (response != 200 && response != 206) throw IOException("HTTP $response")
-            val append = offset > 0L && response == 206
-            if (append) {
-                val range = connection.getHeaderField("Content-Range") ?: ""
-                if (!range.startsWith("bytes $offset-")) {
-                    throw IOException("Unexpected Content-Range response")
-                }
-            }
-            // Servers which ignore Range return 200: safely restart rather than corrupt the ZIP.
-            val startingSize = if (append) offset else 0L
-            val contentLength = connection.contentLengthLong
-            if (contentLength > MAX_ARCHIVE ||
-                (contentLength >= 0L && startingSize + contentLength > MAX_ARCHIVE)) {
-                throw IOException("Model archive is too large")
-            }
-            val expectedSize = if (contentLength >= 0L) startingSize + contentLength else -1L
-            var received = startingSize
-            var previousUpdate = 0L
-            connection.inputStream.buffered().use { input ->
-                FileOutputStream(archive, append).buffered().use { output ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    while (true) {
-                        val count = input.read(buffer)
-                        if (count < 0) break
-                        received += count
-                        if (received > MAX_ARCHIVE) throw IOException("Archive exceeded size limit")
-                        output.write(buffer, 0, count)
-                        val now = System.currentTimeMillis()
-                        if (now - previousUpdate > 800L) {
-                            val currentMb = received / 1024 / 1024
-                            val total = if (expectedSize > 0L) " / ${expectedSize / 1024 / 1024} MB" else " MB"
-                            onProgress("Downloading: $currentMb$total")
-                            previousUpdate = now
-                        }
-                    }
-                }
-            }
-            if (expectedSize >= 0L && received != expectedSize) {
-                throw EOFException("Connection closed after $received of $expectedSize bytes")
-            }
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private fun copyLimited(input: InputStream, output: java.io.OutputStream, progress: (String) -> Unit) {
-        val buffer = ByteArray(BUFFER_SIZE)
-        var total = 0L
-        var lastReportedMb = -1L
-        while (true) {
-            val count = input.read(buffer)
-            if (count < 0) break
-            total += count
-            if (total > MAX_ARCHIVE) throw IOException("Imported archive is too large")
-            output.write(buffer, 0, count)
-            val megabytes = total / 1024 / 1024
-            if (megabytes % 4 == 0L && megabytes != lastReportedMb) {
-                progress("Importing: $megabytes MB")
-                lastReportedMb = megabytes
-            }
-        }
-    }
-
-    private fun checksumMatches(file: File, expected: String): Boolean {
-        if (!file.isFile || file.length() == 0L || file.length() > MAX_ARCHIVE) return false
-        val digest = MessageDigest.getInstance("SHA-256")
-        FileInputStream(file).buffered().use { input ->
-            val buffer = ByteArray(BUFFER_SIZE)
-            while (true) {
-                val count = input.read(buffer)
-                if (count < 0) break
-                digest.update(buffer, 0, count)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-            .equals(expected, ignoreCase = true)
-    }
-
-    private fun install(context: Context, language: ModelLanguage, archive: File, onProgress: (String) -> Unit) {
-        if (isInstalled(context, language)) return
+    fun isInstalled(context: Context, language: ModelLanguage): Boolean {
         val dest = destination(context, language)
-        val parent = dest.parentFile ?: error("Model directory unavailable")
-        check(parent.isDirectory || parent.mkdirs()) { "Cannot create model directory" }
-        val stage = File(parent, "${language.code}.tmp")
-        stage.deleteRecursively()
-        check(stage.mkdirs()) { "Cannot create staging directory" }
+        return File(dest, ".ready").isFile && File(dest, "am").isDirectory &&
+            File(dest, "conf").isDirectory
+    }
+
+    /** Runs on a worker thread; synchronization protects against activity recreation. */
+    @Synchronized
+    fun ensureInstalled(context: Context, language: ModelLanguage, progress: (Int) -> Unit) {
+        if (isInstalled(context, language)) return
+        val target = destination(context, language)
+        val parent = target.parentFile ?: throw IOException("Model directory unavailable")
+        if (!parent.isDirectory && !parent.mkdirs()) throw IOException("Cannot create model directory")
+        val stage = File(parent, language.code + ".staging")
+        if (stage.exists() && !stage.deleteRecursively()) throw IOException("Cannot clear staging directory")
+        if (!stage.mkdirs()) throw IOException("Cannot create staging directory")
         try {
-            onProgress("Extracting model…")
+            progress(0)
             var expanded = 0L
             var entries = 0
-            ZipInputStream(FileInputStream(archive).buffered()).use { zip ->
-                val buffer = ByteArray(BUFFER_SIZE)
-                while (true) {
-                    val entry = zip.nextEntry ?: break
-                    check(++entries <= 10_000) { "Too many ZIP entries" }
-                    val components = entry.name.replace('\\', '/').split('/')
-                        .filter { it.isNotEmpty() }
-                    check(components.isNotEmpty() && components.none { it == "." || it == ".." }) {
-                        "Unsafe ZIP entry"
-                    }
-                    // Vosk archives have one common root directory.
-                    val inner = components.drop(1)
-                    if (inner.isNotEmpty()) {
-                        val target = File(stage, inner.joinToString("/"))
-                        check(target.canonicalPath.startsWith(stage.canonicalPath + File.separator)) {
-                            "Unsafe extraction path"
-                        }
-                        if (entry.isDirectory) {
-                            check(target.isDirectory || target.mkdirs()) { "Cannot create directory" }
-                        } else {
-                            check(target.parentFile!!.isDirectory || target.parentFile!!.mkdirs()) {
-                                "Cannot create parent directory"
-                            }
-                            target.outputStream().buffered().use { output ->
-                                while (true) {
-                                    val count = zip.read(buffer)
-                                    if (count < 0) break
-                                    expanded += count
-                                    check(expanded <= MAX_EXTRACTED) { "Extracted model is too large" }
-                                    output.write(buffer, 0, count)
+            var archiveRoot: String? = null
+            context.assets.open(language.bundledAsset).buffered().use { asset ->
+                ZipInputStream(asset).use { zip ->
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    while (true) {
+                        val entry = zip.nextEntry ?: break
+                        if (++entries > MAX_ENTRIES) throw IOException("Too many ZIP entries")
+                        val parts = entry.name.replace('\\', '/').split('/').filter { it.isNotEmpty() }
+                        if (parts.isEmpty() || parts.any { it == "." || it == ".." })
+                            throw IOException("Unsafe ZIP entry")
+                        if (archiveRoot == null) archiveRoot = parts.first()
+                        else if (parts.first() != archiveRoot)
+                            throw IOException("More than one model root in ZIP")
+                        val inside = parts.drop(1)
+                        if (inside.isNotEmpty()) {
+                            val relative = inside.joinToString("/")
+                            if (relative == ".ready") throw IOException("Reserved model file")
+                            val file = File(stage, relative)
+                            if (!file.canonicalPath.startsWith(stage.canonicalPath + File.separator))
+                                throw IOException("ZIP path traversal")
+                            if (entry.isDirectory) {
+                                if (!file.isDirectory && !file.mkdirs())
+                                    throw IOException("Cannot create directory")
+                            } else {
+                                val folder = file.parentFile ?: throw IOException("Missing parent directory")
+                                if (!folder.isDirectory && !folder.mkdirs())
+                                    throw IOException("Cannot create directory")
+                                file.outputStream().buffered().use { output ->
+                                    while (true) {
+                                        val count = zip.read(buffer)
+                                        if (count < 0) break
+                                        expanded += count
+                                        if (expanded > MAX_UNPACKED_BYTES)
+                                            throw IOException("Extracted model is too large")
+                                        output.write(buffer, 0, count)
+                                    }
                                 }
                             }
                         }
+                        zip.closeEntry()
+                        if (entries % 25 == 0) progress(entries)
                     }
-                    zip.closeEntry()
-                    if (entries % 25 == 0) onProgress("Extracting: $entries files")
                 }
             }
-            check(File(stage, "am").isDirectory && File(stage, "conf").isDirectory) {
-                "Invalid Vosk model ZIP"
-            }
-            check(File(stage, ".ready").createNewFile()) { "Cannot finalize model" }
-            if (dest.exists()) {
-                if (isInstalled(context, language)) return
-                check(dest.deleteRecursively()) { "Cannot replace incomplete model" }
-            }
-            check(stage.renameTo(dest)) { "Cannot install model" }
-            onProgress("Model ready")
+            if (!File(stage, "am").isDirectory || !File(stage, "conf").isDirectory)
+                throw IOException("Bundled model missing Vosk directories")
+            if (!File(stage, ".ready").createNewFile()) throw IOException("Cannot mark model ready")
+            if (target.exists() && !target.deleteRecursively())
+                throw IOException("Cannot replace incomplete model")
+            if (!stage.renameTo(target)) throw IOException("Cannot finalize model")
+            progress(-1)
+        } catch (error: Exception) {
+            throw IOException("Bundled model preparation failed: " + error.message, error)
         } finally {
             stage.deleteRecursively()
         }

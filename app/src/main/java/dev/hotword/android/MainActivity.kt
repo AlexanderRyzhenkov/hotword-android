@@ -2,18 +2,17 @@ package dev.hotword.android
 
 import android.Manifest
 import android.app.Activity
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
+import android.view.WindowInsets
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.Spinner
-import android.widget.ArrayAdapter
-import android.widget.AdapterView
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import dev.hotword.android.assistant.AssistantLauncher
@@ -24,15 +23,13 @@ import dev.hotword.android.settings.ModelLanguage
 import dev.hotword.android.settings.Preferences
 
 class MainActivity : Activity() {
-    private lateinit var input: EditText
-    private lateinit var language: Spinner
+    private lateinit var phraseInput: EditText
     private lateinit var status: TextView
-    private lateinit var downloadButton: Button
-    private lateinit var importButton: Button
     private lateinit var startButton: Button
+    private lateinit var retryButton: Button
     private val ui = Handler(Looper.getMainLooper())
-    private var downloading = false
-    private var pendingImportLanguage: ModelLanguage? = null
+    private var preparing = false
+    private val modelLanguage = ModelLanguage.RUSSIAN
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,53 +38,39 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             setPadding(padding, padding, padding, padding)
         }
-        val title = TextView(this).apply {
+        layout.addView(TextView(this).apply {
             text = getString(R.string.app_name)
             textSize = 25f
             setPadding(0, 0, 0, padding)
-        }
-        layout.addView(title)
+        })
         layout.addView(TextView(this).apply { text = getString(R.string.phrase_label) })
-        input = EditText(this).apply {
+        phraseInput = EditText(this).apply {
             setSingleLine(true)
             setText(Preferences.phrase(this@MainActivity))
             hint = getString(R.string.phrase_hint)
         }
-        layout.addView(input)
-        layout.addView(TextView(this).apply { text = getString(R.string.language_label) })
-        language = Spinner(this).apply {
-            adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
-                listOf(getString(R.string.russian), getString(R.string.english)))
-            setSelection(if (Preferences.language(this@MainActivity) == ModelLanguage.RUSSIAN) 0 else 1)
-        }
-        layout.addView(language)
+        layout.addView(phraseInput)
+        layout.addView(TextView(this).apply { text = getString(R.string.language_russian_only) })
         status = TextView(this).apply { setPadding(0, padding / 2, 0, padding / 2) }
         layout.addView(status)
-        downloadButton = Button(this).apply {
-            text = getString(R.string.download)
-            setOnClickListener { downloadModel() }
+        retryButton = Button(this).apply {
+            text = getString(R.string.retry_preparing)
+            visibility = View.GONE
+            setOnClickListener { prepareBundledModel() }
         }
-        layout.addView(downloadButton)
-        importButton = Button(this).apply {
-            text = getString(R.string.import_model)
-            setOnClickListener {
-                if (downloading || ModelInstaller.isInstalled(this@MainActivity, selectedLanguage())) return@setOnClickListener
-                pendingImportLanguage = selectedLanguage()
-                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "*/*"
-                }, REQUEST_IMPORT_ZIP)
-            }
-        }
-        layout.addView(importButton)
+        layout.addView(retryButton)
         startButton = Button(this).apply {
             text = getString(R.string.start)
+            isEnabled = false
             setOnClickListener { startListening() }
         }
         layout.addView(startButton)
         layout.addView(Button(this).apply {
             text = getString(R.string.stop)
-            setOnClickListener { WakeWordService.stop(this@MainActivity); status.text = getString(R.string.stopped) }
+            setOnClickListener {
+                WakeWordService.stop(this@MainActivity)
+                status.text = getString(R.string.stopped)
+            }
         })
         layout.addView(Button(this).apply {
             text = getString(R.string.test_assistant)
@@ -99,90 +82,81 @@ class MainActivity : Activity() {
             text = getString(R.string.usage_warning)
             setPadding(0, padding, 0, 0)
         })
-        val scroll = android.widget.ScrollView(this).apply { addView(layout) }
+
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(layout)
+        }
+        // targetSdk 35 enforces edge-to-edge. Use actual system and cutout insets
+        // instead of a hard-coded status bar height, which is wrong on HyperOS.
+        if (Build.VERSION.SDK_INT >= 30) {
+            window.setDecorFitsSystemWindows(false)
+            scroll.setOnApplyWindowInsetsListener { view, insets ->
+                val safe = insets.getInsets(
+                    WindowInsets.Type.systemBars() or
+                        WindowInsets.Type.displayCutout() or WindowInsets.Type.ime()
+                )
+                view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
+                insets
+            }
+        } else {
+            scroll.fitsSystemWindows = true
+        }
         setContentView(scroll)
-        language.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
-                if (!downloading) updateModelStatus()
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
-        updateModelStatus()
+        prepareBundledModel()
     }
 
-    private fun selectedLanguage(): ModelLanguage =
-        if (language.selectedItemPosition == 0) ModelLanguage.RUSSIAN else ModelLanguage.ENGLISH
-
-    private fun updateModelStatus() {
-        val ready = ModelInstaller.isInstalled(this, selectedLanguage())
-        status.text = if (ready) getString(R.string.model_ready) else getString(R.string.model_missing)
-        downloadButton.isEnabled = !downloading && !ready
-        importButton.isEnabled = !downloading && !ready
-    }
-
-    private fun saveSettings(): Boolean {
-        val phrase = input.text.toString().trim()
-        if (TriggerMatcher.normalize(phrase).isBlank() || phrase.length > 100) {
-            toast(getString(R.string.phrase_invalid))
-            return false
-        }
-        Preferences.save(this, phrase, selectedLanguage())
-        return true
-    }
-
-    private fun downloadModel() {
-        val chosen = selectedLanguage()
-        runModelTask(chosen) { progress -> ModelInstaller.download(applicationContext, chosen, progress) }
-    }
-
-    private fun runModelTask(chosen: ModelLanguage, task: ((String) -> Unit) -> Unit) {
-        if (downloading || ModelInstaller.isInstalled(this, chosen)) return
-        downloading = true
-        language.isEnabled = false
-        downloadButton.isEnabled = false
-        importButton.isEnabled = false
-        startButton.isEnabled = false
-        Thread({
-            try {
-                task { message -> ui.post { status.text = message } }
-                ui.post { status.text = getString(R.string.model_ready) }
-            } catch (error: Exception) {
-                ui.post { status.text = getString(R.string.download_error, error.message ?: "unknown") }
-            } finally {
-                ui.post {
-                    downloading = false
-                    language.isEnabled = true
-                    startButton.isEnabled = true
-                    val ready = ModelInstaller.isInstalled(this, selectedLanguage())
-                    downloadButton.isEnabled = !ready
-                    importButton.isEnabled = !ready
-                }
-            }
-        }, "ModelInstall").start()
-    }
-
-    @Deprecated("Platform SAF used without an AndroidX dependency in MVP")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode != REQUEST_IMPORT_ZIP) return
-        val chosen = pendingImportLanguage
-        pendingImportLanguage = null
-        val uri = data?.data
-        if (resultCode == Activity.RESULT_OK && chosen != null && uri != null) {
-            runModelTask(chosen) { progress ->
-                ModelInstaller.importArchive(applicationContext, chosen, uri, progress)
-            }
-        }
-    }
-
-    companion object { private const val REQUEST_IMPORT_ZIP = 410 }
-
-    private fun startListening(skipNotificationPermission: Boolean = false) {
-        if (!saveSettings()) return
-        if (!ModelInstaller.isInstalled(this, selectedLanguage())) {
-            toast(getString(R.string.model_missing))
+    private fun prepareBundledModel() {
+        if (preparing) return
+        if (ModelInstaller.isInstalled(this, modelLanguage)) {
+            status.text = getString(R.string.model_ready)
+            startButton.isEnabled = true
+            retryButton.visibility = View.GONE
             return
         }
+        preparing = true
+        status.text = getString(R.string.model_preparing)
+        retryButton.visibility = View.GONE
+        startButton.isEnabled = false
+        Thread({
+            val result = runCatching {
+                ModelInstaller.ensureInstalled(applicationContext, modelLanguage) { entries ->
+                    ui.post {
+                        if (!isFinishing && !isDestroyed) {
+                            status.text = if (entries > 0)
+                                getString(R.string.model_preparing_files, entries)
+                            else getString(R.string.model_preparing)
+                        }
+                    }
+                }
+            }
+            ui.post {
+                if (isFinishing || isDestroyed) return@post
+                preparing = false
+                if (result.isSuccess) {
+                    status.text = getString(R.string.model_ready)
+                    startButton.isEnabled = true
+                } else {
+                    status.text = getString(R.string.model_prepare_error,
+                        result.exceptionOrNull()?.message ?: "unknown")
+                    retryButton.visibility = View.VISIBLE
+                }
+            }
+        }, "BundledModelPreparation").start()
+    }
+
+    private fun startListening(skipNotificationPermission: Boolean = false) {
+        val phrase = phraseInput.text.toString().trim()
+        if (TriggerMatcher.normalize(phrase).isBlank() || phrase.length > 100) {
+            toast(getString(R.string.phrase_invalid))
+            return
+        }
+        if (!ModelInstaller.isInstalled(this, modelLanguage)) {
+            prepareBundledModel()
+            return
+        }
+        Preferences.save(this, phrase)
         val missing = mutableListOf<String>()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
             missing.add(Manifest.permission.RECORD_AUDIO)
@@ -194,25 +168,28 @@ class MainActivity : Activity() {
             return
         }
         try {
-            WakeWordService.stop(this) // A changed phrase must be picked up at next service start.
+            WakeWordService.stop(this)
             ui.postDelayed({
+                if (isFinishing || isDestroyed) return@postDelayed
                 try {
                     WakeWordService.start(this)
                     status.text = getString(R.string.start_requested)
-                } catch (error: Exception) { toast(error.message ?: getString(R.string.start_error)) }
+                } catch (error: Exception) {
+                    toast(error.message ?: getString(R.string.start_error))
+                }
             }, 300)
         } catch (error: Exception) {
             toast(error.message ?: getString(R.string.start_error))
         }
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, results: IntArray) {
+    override fun onRequestPermissionsResult(requestCode: Int,
+        permissions: Array<out String>, results: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, results)
         if (requestCode == 100) {
-            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                // Notification permission is optional; fallback notification may be hidden if denied.
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED)
                 startListening(skipNotificationPermission = true)
-            } else toast(getString(R.string.mic_required))
+            else toast(getString(R.string.mic_required))
         }
     }
 

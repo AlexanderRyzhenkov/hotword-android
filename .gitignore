@@ -8,3 +8,6 @@
 *.apk
 *.aab
 *.keystore
+# Verified offline model is downloaded on CI/developer machine and packaged into the APK.
+/app/src/main/assets/models/*.zip
+/app/src/main/assets/models/*.part
