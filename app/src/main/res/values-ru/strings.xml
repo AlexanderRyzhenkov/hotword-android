@@ -24,4 +24,27 @@
     <string name="error_notification">Ошибка распознавания: %1$s</string>
     <string name="notification_channel">Сервис голосовой активации</string>
     <string name="usage_warning">Экспериментальный MVP: русская модель находится внутри APK, интернет и загрузка не нужны. Android может запретить автоматический запуск выбранного помощника из фона или на экране блокировки; предусмотрено уведомление. Звук обрабатывается локально. После изменения фразы перезапустите прослушивание.</string>
+    <string name="phrase_apply_hint">Фраза применяется автоматически после небольшой паузы во время ввода.</string>
+    <string name="setup_heading">Разрешения и работа в фоне</string>
+    <string name="permission_check">Микрофон: %1$s   Уведомления: %2$s</string>
+    <string name="app_settings">Разрешения приложения</string>
+    <string name="battery_check">Исключение из оптимизации Android: %1$s. Фоновые ограничения: %2$s. У HyperOS есть отдельные ограничения.</string>
+    <string name="battery_exempt">есть</string>
+    <string name="battery_restricted">нет</string>
+    <string name="background_restricted">обнаружены</string>
+    <string name="background_not_restricted">не обнаружены</string>
+    <string name="battery_settings">Открыть настройки батареи</string>
+    <string name="autostart_unverifiable">Android не позволяет программно проверить автозапуск HyperOS. Разрешите его вручную, а также выберите режим батареи «Без ограничений».</string>
+    <string name="autostart_settings">Открыть настройки автозапуска</string>
+    <string name="active_preparing">Подготовка автоматического прослушивания…</string>
+    <string name="running">Прослушивание работает в фоне</string>
+    <string name="restarting">Смена фразы: перезапуск прослушивания…</string>
+    <string name="listener_active">Голосовая активация включена</string>
+    <string name="alert_channel">Ошибки Hotword</string>
+    <string name="assistant_launch_failed">Не удалось автоматически открыть помощника. Нажмите для повторной попытки.</string>
+    <string name="listener_failed">Прослушивание остановлено после повторных ошибок: %1$s</string>
+    <string name="attention_required">Hotword требует внимания</string>
+    <string name="boot_channel">Возобновление активации</string>
+    <string name="boot_title">Возобновите работу Hotword Android</string>
+    <string name="boot_message">Android требует открыть приложение после перезагрузки, чтобы возобновить работу микрофона.</string>
 </resources>
