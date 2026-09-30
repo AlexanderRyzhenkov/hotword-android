@@ -24,4 +24,27 @@
     <string name="error_notification">Listening error: %1$s</string>
     <string name="notification_channel">Voice trigger service</string>
     <string name="usage_warning">Experimental MVP: the Russian model is included in the APK, so no download or internet is needed. Android may block background or lock-screen assistant launch; a notification is the fallback. Audio stays on the device. Restart listening after changing the phrase.</string>
+    <string name="phrase_apply_hint">The phrase is applied automatically after you pause typing.</string>
+    <string name="setup_heading">Permissions and background operation</string>
+    <string name="permission_check">Microphone: %1$s   Notifications: %2$s</string>
+    <string name="app_settings">App permissions</string>
+    <string name="battery_check">Android battery exemption: %1$s. Background restriction: %2$s. HyperOS has separate limits.</string>
+    <string name="battery_exempt">granted</string>
+    <string name="battery_restricted">not granted</string>
+    <string name="background_restricted">detected</string>
+    <string name="background_not_restricted">not detected</string>
+    <string name="battery_settings">Open battery settings</string>
+    <string name="autostart_unverifiable">HyperOS autostart cannot be checked through a public Android API. Enable it manually. Set the app to unrestricted battery usage.</string>
+    <string name="autostart_settings">Open autostart settings</string>
+    <string name="active_preparing">Preparing automatic listening…</string>
+    <string name="running">Listening in the background</string>
+    <string name="restarting">Applying phrase and restarting listening…</string>
+    <string name="listener_active">Voice activation enabled</string>
+    <string name="alert_channel">Hotword errors</string>
+    <string name="assistant_launch_failed">Could not launch the selected assistant. Tap to try manually.</string>
+    <string name="listener_failed">Listening stopped after repeated errors: %1$s</string>
+    <string name="attention_required">Hotword needs attention</string>
+    <string name="boot_channel">Resume voice activation</string>
+    <string name="boot_title">Resume Hotword Android</string>
+    <string name="boot_message">Android requires opening the app after reboot to resume microphone access.</string>
 </resources>
