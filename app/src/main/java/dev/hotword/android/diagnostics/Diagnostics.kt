@@ -23,7 +23,7 @@ object Diagnostics {
         val timestamp = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date())
         val previous = prefs.getString(KEY, "").orEmpty().lineSequence().filter { it.isNotBlank() }
         prefs.edit().putString(KEY,
-            (previous + "$timestamp · $event").takeLast(MAX_LINES).joinToString("\n")
+            (previous + "$timestamp · $event").toList().takeLast(MAX_LINES).joinToString("\n")
         ).apply()
     }
 
