@@ -36,7 +36,7 @@ class MainActivity : Activity() {
     private lateinit var autostartStatus: TextView
     private var modelReady = false
     private var preparing = false
-    private var restarting = false
+    private var resumed = false
     private var micRequested = false
     private var notificationRequested = false
     private var permissionRequestInFlight = false
@@ -138,8 +138,18 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         updateChecks()
-        if (modelReady && !restarting) ensureListening()
+        if (modelReady) ensureListening()
+    }
+
+    override fun onPause() {
+        // Persist/reload any pending edit BEFORE losing our visible Activity.
+        phraseApply?.let(ui::removeCallbacks)
+        phraseApply = null
+        if (::input.isInitialized) applyPhrase(input.text.toString().trim())
+        resumed = false
+        super.onPause()
     }
 
     private fun prepareModel() {
@@ -187,17 +197,19 @@ class MainActivity : Activity() {
         }
         Preferences.save(this, phrase)
         if (!modelReady || !DeviceSetup.microphoneGranted(this)) return
-        restarting = true
         status.text = getString(R.string.restarting)
-        WakeWordService.stop(this)
-        ui.postDelayed({
-            restarting = false
-            if (!isDestroyed && !isFinishing) ensureListening()
-        }, 700)
+        // The old stop/delayed-start sequence could leave recognition OFF when
+        // the user switched apps in that window. Reload inside the live FGS.
+        try {
+            if (WakeWordService.isActive) WakeWordService.reload(this)
+            else if (resumed) ensureListening()
+        } catch (error: Exception) {
+            status.text = getString(R.string.start_error)
+        }
     }
 
     private fun ensureListening() {
-        if (!modelReady || restarting || permissionRequestInFlight || isDestroyed || isFinishing) return
+        if (!modelReady || !resumed || permissionRequestInFlight || isDestroyed || isFinishing) return
         if (!DeviceSetup.microphoneGranted(this)) {
             status.text = getString(R.string.mic_required)
             if (!micRequested) {
@@ -253,7 +265,7 @@ class MainActivity : Activity() {
         permissionRequestInFlight = false
         updateChecks()
         if ((requestCode == REQUEST_MIC || requestCode == REQUEST_NOTIFICATIONS) &&
-            modelReady && !restarting) ensureListening()
+            modelReady) ensureListening()
     }
 
     override fun onDestroy() {
