@@ -39,6 +39,7 @@ class MainActivity : Activity() {
     private var restarting = false
     private var micRequested = false
     private var notificationRequested = false
+    private var permissionRequestInFlight = false
     private var phraseApply: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -196,11 +197,12 @@ class MainActivity : Activity() {
     }
 
     private fun ensureListening() {
-        if (!modelReady || restarting || isDestroyed || isFinishing) return
+        if (!modelReady || restarting || permissionRequestInFlight || isDestroyed || isFinishing) return
         if (!DeviceSetup.microphoneGranted(this)) {
             status.text = getString(R.string.mic_required)
             if (!micRequested) {
                 micRequested = true
+                permissionRequestInFlight = true
                 requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC)
             }
             return
@@ -208,7 +210,9 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33 &&
             !DeviceSetup.notificationsGranted(this) && !notificationRequested) {
             notificationRequested = true
+            permissionRequestInFlight = true
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+            return // Keep this activity visible until the permission dialog is dismissed.
         }
         if (!WakeWordService.isActive) {
             try {
@@ -246,6 +250,7 @@ class MainActivity : Activity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        permissionRequestInFlight = false
         updateChecks()
         if ((requestCode == REQUEST_MIC || requestCode == REQUEST_NOTIFICATIONS) &&
             modelReady && !restarting) ensureListening()
