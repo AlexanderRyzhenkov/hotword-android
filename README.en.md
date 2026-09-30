@@ -12,7 +12,7 @@ An open-source Android application that detects a **user-defined trigger phrase*
 - Local, offline microphone processing using [Vosk](https://alphacephei.com/vosk/): no audio recording or uploading.
 - Standard Android `Intent.ACTION_ASSIST` invocation, independent of any assistant provider.
 - An explicitly user-started microphone foreground service with a persistent notification, stop action, and a 20-second microphone release window after detection.
-- Optional one-time download of a small Russian or English Vosk model directly from Vosk.
+- One-time Vosk model download with alternate mirrors, retry after timeouts, HTTP Range resume where supported, progress and pinned SHA-256 verification. Offline ZIP import is available if online sources cannot be reached.
 - GitHub Actions build workflow with a debug APK artifact upon successful build.
 
 ## Build and try it
@@ -20,7 +20,8 @@ An open-source Android application that detects a **user-defined trigger phrase*
 1. Set your desired **default digital assistant** in Android settings.
 2. Open the project with Android Studio (JDK 17, Android SDK 35, Gradle 8.13) or run `gradle :app:assembleDebug`. The MVP does not include a Gradle Wrapper; CI installs Gradle automatically.
 3. Install the debug APK, tap **Test default assistant** and confirm your chosen assistant starts in the foreground.
-4. Select the recognition language, set your phrase and **Download offline model**. A connection is required for this initial download only. Models take tens of MB and need extra extraction space.
+4. Select the language, enter your phrase and tap **Download offline model**. After a connection failure, retry: the app preserves downloaded bytes, resumes where the server allows HTTP Range and tries alternate sources. The archives are roughly 40–50 MB.
+   - If all online sources fail, download the correct ZIP on another device from the [official Vosk model page](https://alphacephei.com/vosk/models) (`vosk-model-small-ru-0.22.zip` or `vosk-model-small-en-us-0.15.zip`), copy it to the phone and tap **Import model from ZIP**. Installation is offline and the archive is SHA-256 verified.
 5. Allow microphone access (notifications are recommended), then tap **Start listening**. Test recognition with the screen on, while another app is in the foreground, and finally with the screen locked.
 6. If the assistant did not automatically open, use the detection notification's **Open assistant** action. Stop and restart listening after changing language or trigger phrase.
 
@@ -32,7 +33,7 @@ After a successful CI build, download the APK from **Actions → Android CI → 
 - `ACTION_ASSIST` requests the system-selected assistant, but does **not** guarantee that the assistant starts listening or works on a locked screen.
 - The MVP uses continuous **automatic speech recognition (ASR)** with phrase matching rather than a dedicated low-power keyword detector. False positives, missed triggers, out-of-vocabulary words, and significant battery use are possible. Prefer long, distinctive phrases.
 - Listening must be explicitly enabled. Android may prevent microphone service auto-start after reboot or forced termination. OEM battery management may kill the process.
-- GitHub Actions successfully compiled the debug APK and ran unit tests on 2026-09-30. Background/locked-screen behavior on Xiaomi 14 is **not yet verified on a physical device**; this is a test prototype, not a production release.
+- Xiaomi 14 compatibility and the initial CI build have **not yet been verified**; this is a test prototype, not a production release.
 
 ## Architecture
 
@@ -53,7 +54,7 @@ MainActivity ──> Preferences + ModelInstaller
 
 ## Security and privacy
 
-Microphone audio stays on device and is not written to disk. Internet access is only needed to download the chosen model. A persistent notification indicates microphone use and includes an explicit stop action. This app does not use Accessibility or bypass Android platform restrictions.
+Microphone audio stays on device and is not written to disk. Internet access is only needed for downloading a model; a model ZIP can be imported fully offline. Both paths validate pinned SHA-256 digests to reject damaged or substituted archives. A persistent notification indicates microphone use and includes an explicit stop action. This app does not use Accessibility or bypass Android platform restrictions.
 
 ## Contributing and roadmap
 

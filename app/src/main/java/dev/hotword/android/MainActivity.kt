@@ -2,6 +2,7 @@ package dev.hotword.android
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -27,9 +28,11 @@ class MainActivity : Activity() {
     private lateinit var language: Spinner
     private lateinit var status: TextView
     private lateinit var downloadButton: Button
+    private lateinit var importButton: Button
     private lateinit var startButton: Button
     private val ui = Handler(Looper.getMainLooper())
     private var downloading = false
+    private var pendingImportLanguage: ModelLanguage? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -65,6 +68,18 @@ class MainActivity : Activity() {
             setOnClickListener { downloadModel() }
         }
         layout.addView(downloadButton)
+        importButton = Button(this).apply {
+            text = getString(R.string.import_model)
+            setOnClickListener {
+                if (downloading || ModelInstaller.isInstalled(this@MainActivity, selectedLanguage())) return@setOnClickListener
+                pendingImportLanguage = selectedLanguage()
+                startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                    type = "*/*"
+                }, REQUEST_IMPORT_ZIP)
+            }
+        }
+        layout.addView(importButton)
         startButton = Button(this).apply {
             text = getString(R.string.start)
             setOnClickListener { startListening() }
@@ -102,6 +117,7 @@ class MainActivity : Activity() {
         val ready = ModelInstaller.isInstalled(this, selectedLanguage())
         status.text = if (ready) getString(R.string.model_ready) else getString(R.string.model_missing)
         downloadButton.isEnabled = !downloading && !ready
+        importButton.isEnabled = !downloading && !ready
     }
 
     private fun saveSettings(): Boolean {
@@ -116,27 +132,50 @@ class MainActivity : Activity() {
 
     private fun downloadModel() {
         val chosen = selectedLanguage()
+        runModelTask(chosen) { progress -> ModelInstaller.download(applicationContext, chosen, progress) }
+    }
+
+    private fun runModelTask(chosen: ModelLanguage, task: ((String) -> Unit) -> Unit) {
         if (downloading || ModelInstaller.isInstalled(this, chosen)) return
         downloading = true
+        language.isEnabled = false
         downloadButton.isEnabled = false
+        importButton.isEnabled = false
         startButton.isEnabled = false
         Thread({
             try {
-                ModelInstaller.download(applicationContext, chosen) { message ->
-                    ui.post { status.text = message }
-                }
+                task { message -> ui.post { status.text = message } }
                 ui.post { status.text = getString(R.string.model_ready) }
-            } catch (error: Throwable) {
+            } catch (error: Exception) {
                 ui.post { status.text = getString(R.string.download_error, error.message ?: "unknown") }
             } finally {
                 ui.post {
                     downloading = false
+                    language.isEnabled = true
                     startButton.isEnabled = true
-                    downloadButton.isEnabled = !ModelInstaller.isInstalled(this, chosen)
+                    val ready = ModelInstaller.isInstalled(this, selectedLanguage())
+                    downloadButton.isEnabled = !ready
+                    importButton.isEnabled = !ready
                 }
             }
-        }, "ModelDownload").start()
+        }, "ModelInstall").start()
     }
+
+    @Deprecated("Platform SAF used without an AndroidX dependency in MVP")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_IMPORT_ZIP) return
+        val chosen = pendingImportLanguage
+        pendingImportLanguage = null
+        val uri = data?.data
+        if (resultCode == Activity.RESULT_OK && chosen != null && uri != null) {
+            runModelTask(chosen) { progress ->
+                ModelInstaller.importArchive(applicationContext, chosen, uri, progress)
+            }
+        }
+    }
+
+    companion object { private const val REQUEST_IMPORT_ZIP = 410 }
 
     private fun startListening(skipNotificationPermission: Boolean = false) {
         if (!saveSettings()) return
