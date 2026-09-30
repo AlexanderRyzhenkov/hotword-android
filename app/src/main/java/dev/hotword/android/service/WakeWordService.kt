@@ -18,161 +18,197 @@ import dev.hotword.android.assistant.AssistantLauncher
 import dev.hotword.android.audio.VoskWakeWordEngine
 import dev.hotword.android.audio.WakeWordEngine
 import dev.hotword.android.model.ModelInstaller
+import dev.hotword.android.settings.ModelLanguage
 import dev.hotword.android.settings.Preferences
 import java.util.concurrent.Executors
 
-/** User-initiated microphone foreground service; never automatically launched on boot. */
+/** Minimal persistent microphone foreground service. No manual start/stop actions. */
 class WakeWordService : Service() {
-    private val mainHandler = Handler(Looper.getMainLooper())
-    // Serializes native model initialization/closing; never close a model while it is opening.
-    private val audioWorker = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "HotwordAudioWorker")
+    private val main = Handler(Looper.getMainLooper())
+    private val worker = Executors.newSingleThreadExecutor { job ->
+        Thread(job, "HotwordAudio")
     }
-    private var engine: WakeWordEngine? = null // audioWorker only
+    private var engine: WakeWordEngine? = null // worker only
     @Volatile private var running = false
     @Volatile private var suspended = false
-    private var failed = false
-    private val language by lazy { Preferences.language(this) }
+    private var failures = 0
+    private var lastEngineStart = 0L
     private val phrase by lazy { Preferences.phrase(this) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        val notifications = getSystemService(NotificationManager::class.java)
+        notifications.createNotificationChannel(NotificationChannel(
+            LISTENING_CHANNEL, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW
+        ))
+        notifications.createNotificationChannel(NotificationChannel(
+            ALERT_CHANNEL, getString(R.string.alert_channel), NotificationManager.IMPORTANCE_DEFAULT
+        ))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == STOP) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
         if (running) return START_NOT_STICKY
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
-            !ModelInstaller.isInstalled(this, language)) {
+            !ModelInstaller.isInstalled(this, ModelLanguage.RUSSIAN)) {
             stopSelf()
             return START_NOT_STICKY
         }
-        running = true
         try {
-            startForeground(NOTIFICATION_ID, notification(getString(R.string.listening, phrase)))
+            startForeground(NOTIFICATION_ID, notification())
         } catch (_: Exception) {
             stopSelf()
             return START_NOT_STICKY
         }
+        running = true
+        isActive = true
+        Preferences.markEverStarted(this)
         startEngine()
-        // System must not auto-restart a microphone FGS while the app is in the background.
+        // Android 14+ forbids creating a microphone foreground service at boot.
         return START_NOT_STICKY
     }
 
     private fun startEngine() {
         if (!running || suspended) return
-        audioWorker.execute {
+        worker.execute {
             if (!running || suspended) return@execute
             try {
-                val next = VoskWakeWordEngine(ModelInstaller.destination(this, language), phrase)
+                val next = VoskWakeWordEngine(
+                    ModelInstaller.destination(this, ModelLanguage.RUSSIAN), phrase
+                )
                 engine = next
+                lastEngineStart = System.currentTimeMillis()
                 next.start(
-                    onTrigger = { mainHandler.post { onTriggered() } },
-                    onError = { mainHandler.post { onFailure(it) } }
+                    onTrigger = { main.post { triggered() } },
+                    onError = { main.post { failed(it) } }
                 )
                 if (!running || suspended) {
                     next.close()
                     if (engine === next) engine = null
                 }
             } catch (error: Throwable) {
-                engine?.close()
+                runCatching { engine?.close() }
                 engine = null
-                mainHandler.post { onFailure(error) }
+                main.post { failed(error) }
             }
         }
     }
 
-    private fun onTriggered() {
+    private fun triggered() {
         if (!running || suspended) return
         suspended = true
-        // Drop our AudioRecord before handing the microphone to the chosen assistant.
-        audioWorker.execute {
-            engine?.close()
+        failures = 0
+        // Release the microphone before starting the assistant.
+        worker.execute {
+            runCatching { engine?.close() }
             engine = null
-            mainHandler.post {
+            main.post {
                 if (!running) return@post
-                val notifications = getSystemService(NotificationManager::class.java)
-                notifications.notify(ALERT_ID, notification(getString(R.string.triggered), assistantAction = true))
-                // Background activity launch may be silently blocked. Notification is the fallback.
-                AssistantLauncher.launch(this)
-                mainHandler.postDelayed({
+                if (!AssistantLauncher.launch(this)) {
+                    showFailure(getString(R.string.assistant_launch_failed), assistantAction = true)
+                }
+                main.postDelayed({
                     if (running) {
                         suspended = false
-                        notifications.cancel(ALERT_ID)
-                        notifications.notify(NOTIFICATION_ID, notification(getString(R.string.listening, phrase)))
                         startEngine()
                     }
-                }, 20_000)
+                }, ASSISTANT_WINDOW_MS)
             }
         }
     }
 
-    private fun onFailure(error: Throwable) {
+    private fun failed(error: Throwable) {
         if (!running || suspended) return
-        failed = true
-        getSystemService(NotificationManager::class.java).notify(
-            ALERT_ID, notification(getString(R.string.error_notification, error.message ?: "unknown"))
-        )
-        stopSelf() // Do not busy-loop after a microphone or native engine failure.
+        if (System.currentTimeMillis() - lastEngineStart > STABLE_RESET_MS) failures = 0
+        failures++
+        suspended = true
+        worker.execute {
+            runCatching { engine?.close() }
+            engine = null
+            main.post {
+                if (!running) return@post
+                if (failures <= MAX_RECOVERY_ATTEMPTS) {
+                    main.postDelayed({
+                        if (running) {
+                            suspended = false
+                            startEngine()
+                        }
+                    }, RECOVERY_DELAY_MS * failures)
+                } else {
+                    showFailure(
+                        getString(R.string.listener_failed, error.message ?: "unknown"),
+                        assistantAction = false
+                    )
+                    stopSelf()
+                }
+            }
+        }
     }
 
-    private fun notification(message: String, assistantAction: Boolean = false): Notification {
-        val openApp = PendingIntent.getActivity(
+    private fun notification(): Notification {
+        val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val stop = PendingIntent.getService(
-            this, 1, Intent(this, WakeWordService::class.java).setAction(STOP),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        return Notification.Builder(this, CHANNEL)
+        return Notification.Builder(this, LISTENING_CHANNEL)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(message)
-            .setContentIntent(if (assistantAction) AssistantLauncher.notificationAction(this) else openApp)
-            .setOngoing(!assistantAction)
-            .addAction(Notification.Action.Builder(null, getString(R.string.stop), stop).build())
-            .apply {
-                if (assistantAction) addAction(Notification.Action.Builder(
-                    null, getString(R.string.open_assistant), AssistantLauncher.notificationAction(this@WakeWordService)
-                ).build())
-            }
+            .setContentText(getString(R.string.listener_active))
+            .setContentIntent(open)
+            .setOnlyAlertOnce(true)
+            .setOngoing(true)
+            .setCategory(Notification.CATEGORY_SERVICE)
             .build()
     }
 
-    private fun createNotificationChannel() {
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_DEFAULT)
+    private fun showFailure(message: String, assistantAction: Boolean) {
+        val openApp = PendingIntent.getActivity(
+            this, 15, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        getSystemService(NotificationManager::class.java).notify(
+            ALERT_ID, Notification.Builder(this, ALERT_CHANNEL)
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle(getString(R.string.attention_required))
+                .setContentText(message)
+                .setContentIntent(if (assistantAction)
+                    AssistantLauncher.notificationAction(this) else openApp)
+                .setAutoCancel(true)
+                .build()
         )
     }
 
     override fun onDestroy() {
         running = false
+        isActive = false
         suspended = true
-        mainHandler.removeCallbacksAndMessages(null)
-        audioWorker.execute {
-            engine?.close()
+        main.removeCallbacksAndMessages(null)
+        worker.execute {
+            runCatching { engine?.close() }
             engine = null
         }
-        audioWorker.shutdown()
-        if (!failed) getSystemService(NotificationManager::class.java).cancel(ALERT_ID)
+        worker.shutdown()
         super.onDestroy()
     }
 
     companion object {
-        private const val STOP = "dev.hotword.android.STOP"
-        private const val CHANNEL = "hotword_listener"
+        private const val LISTENING_CHANNEL = "hotword_listener_v2"
+        private const val ALERT_CHANNEL = "hotword_attention"
         private const val NOTIFICATION_ID = 100
         private const val ALERT_ID = 101
+        private const val ASSISTANT_WINDOW_MS = 20_000L
+        private const val STABLE_RESET_MS = 60_000L
+        private const val RECOVERY_DELAY_MS = 5_000L
+        private const val MAX_RECOVERY_ATTEMPTS = 4
+
+        @Volatile var isActive: Boolean = false
+            private set
+
         fun start(context: Context) {
             context.startForegroundService(Intent(context, WakeWordService::class.java))
         }
+
         fun stop(context: Context) {
             context.stopService(Intent(context, WakeWordService::class.java))
         }

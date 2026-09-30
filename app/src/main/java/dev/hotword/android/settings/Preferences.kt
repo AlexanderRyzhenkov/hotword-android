@@ -6,6 +6,7 @@ import android.content.Context
 object Preferences {
     private const val FILE = "hotword_prefs"
     private const val KEY_PHRASE = "phrase"
+    private const val KEY_STARTED = "ever_started"
     const val DEFAULT_PHRASE = "привет помощник"
 
     fun phrase(context: Context): String =
@@ -14,6 +15,14 @@ object Preferences {
 
     // Legacy preferences selecting English are intentionally ignored in Russian-only MVP.
     fun language(@Suppress("UNUSED_PARAMETER") context: Context): ModelLanguage = ModelLanguage.RUSSIAN
+
+    fun everStarted(context: Context): Boolean =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getBoolean(KEY_STARTED, false)
+
+    fun markEverStarted(context: Context) {
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+            .putBoolean(KEY_STARTED, true).apply()
+    }
 
     fun save(context: Context, phrase: String) {
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
