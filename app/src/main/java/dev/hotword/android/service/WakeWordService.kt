@@ -157,7 +157,6 @@ class WakeWordService : Service() {
             .setContentText(getString(R.string.listener_active))
             .setContentIntent(open)
             .setOnlyAlertOnce(true)
-            .setSilent(true)
             .setOngoing(true)
             .setCategory(Notification.CATEGORY_SERVICE)
             .build()
