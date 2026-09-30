@@ -12,6 +12,8 @@ import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
+import android.util.Log
 import dev.hotword.android.MainActivity
 import dev.hotword.android.R
 import dev.hotword.android.assistant.AssistantLauncher
@@ -33,6 +35,19 @@ class WakeWordService : Service() {
     @Volatile private var suspended = false
     private var failures = 0
     private var lastEngineStart = 0L
+    private var cpuLock: PowerManager.WakeLock? = null
+    private val renewCpuLock: Runnable = object : Runnable {
+        override fun run() {
+            if (!running) return
+            // Bounded leases avoid retaining a wake lock after a process/lifecycle error.
+            runCatching {
+                val lock = cpuLock ?: return@runCatching
+                if (lock.isHeld) lock.release()
+                lock.acquire(CPU_LOCK_TIMEOUT_MS)
+            }.onFailure { Log.w(TAG, "Cannot keep recognition awake", it) }
+            main.postDelayed(this, CPU_LOCK_RENEW_MS)
+        }
+    }
     private val phrase by lazy { Preferences.phrase(this) }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -49,7 +64,7 @@ class WakeWordService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (running) return START_NOT_STICKY
+        if (running) return START_STICKY
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
             !ModelInstaller.isInstalled(this, ModelLanguage.RUSSIAN)) {
             stopSelf()
@@ -64,9 +79,16 @@ class WakeWordService : Service() {
         running = true
         isActive = true
         Preferences.markEverStarted(this)
+        // An active foreground service may continue recording while its Activity is
+        // gone. Holding a bounded, renewed CPU lease helps on screen-off devices.
+        cpuLock = (getSystemService(POWER_SERVICE) as PowerManager)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, packageName + ":HotwordListening")
+            .apply { setReferenceCounted(false) }
+        renewCpuLock.run()
         startEngine()
-        // Android 14+ forbids creating a microphone foreground service at boot.
-        return START_NOT_STICKY
+        // A system-managed restart may recover after process eviction, but is not
+        // a bypass for force-stop, boot or OEM microphone/background restrictions.
+        return START_STICKY
     }
 
     private fun startEngine() {
@@ -172,8 +194,10 @@ class WakeWordService : Service() {
                 .setSmallIcon(android.R.drawable.ic_dialog_alert)
                 .setContentTitle(getString(R.string.attention_required))
                 .setContentText(message)
-                .setContentIntent(if (assistantAction)
-                    AssistantLauncher.notificationAction(this) else openApp)
+                .setContentIntent(
+                    if (assistantAction) AssistantLauncher.notificationAction(this) ?: openApp
+                    else openApp
+                )
                 .setAutoCancel(true)
                 .build()
         )
@@ -184,6 +208,8 @@ class WakeWordService : Service() {
         isActive = false
         suspended = true
         main.removeCallbacksAndMessages(null)
+        runCatching { cpuLock?.takeIf { it.isHeld }?.release() }
+        cpuLock = null
         worker.execute {
             runCatching { engine?.close() }
             engine = null
@@ -193,6 +219,9 @@ class WakeWordService : Service() {
     }
 
     companion object {
+        private const val TAG = "HotwordService"
+        private const val CPU_LOCK_TIMEOUT_MS = 10 * 60_000L
+        private const val CPU_LOCK_RENEW_MS = 9 * 60_000L
         private const val LISTENING_CHANNEL = "hotword_listener_v2"
         private const val ALERT_CHANNEL = "hotword_attention"
         private const val NOTIFICATION_ID = 100
