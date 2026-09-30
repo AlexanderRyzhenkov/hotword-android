@@ -23,10 +23,25 @@ jobs:
           gradle-version: '8.13'
       - name: Install Android platform
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Prepare pinned Russian model at build time
+        run: bash scripts/prepare-bundled-model.sh
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --stacktrace
-      - name: Assemble debug APK
+      - name: Assemble APK
         run: gradle :app:assembleDebug --stacktrace
+      - name: Verify APK contains the correct offline model
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import pathlib
+          import zipfile
+          apk = pathlib.Path('app/build/outputs/apk/debug/app-debug.apk')
+          expected = pathlib.Path('models/ru.sha256').read_text().strip()
+          with zipfile.ZipFile(apk) as archive:
+              model = archive.read('assets/models/ru.zip')
+          assert hashlib.sha256(model).hexdigest() == expected, "Model missing or damaged"
+          print(f"Verified bundled model: {len(model)/1024/1024:.1f} MiB")
+          PY
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
