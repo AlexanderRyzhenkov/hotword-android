@@ -48,7 +48,8 @@ class WakeWordService : Service() {
             main.postDelayed(this, CPU_LOCK_RENEW_MS)
         }
     }
-    private val phrase by lazy { Preferences.phrase(this) }
+    private var phrase = "" // main thread, reloaded without destroying the foreground service
+    private var assistantWindow = false // main thread
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -64,6 +65,10 @@ class WakeWordService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_RELOAD && running) {
+            reloadPhrase()
+            return START_STICKY
+        }
         if (running) return START_STICKY
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED ||
             !ModelInstaller.isInstalled(this, ModelLanguage.RUSSIAN)) {
@@ -77,6 +82,7 @@ class WakeWordService : Service() {
             return START_NOT_STICKY
         }
         running = true
+        phrase = Preferences.phrase(this)
         isActive = true
         Preferences.markEverStarted(this)
         // An active foreground service may continue recording while its Activity is
@@ -89,6 +95,22 @@ class WakeWordService : Service() {
         // A system-managed restart may recover after process eviction, but is not
         // a bypass for force-stop, boot or OEM microphone/background restrictions.
         return START_STICKY
+    }
+
+    /** Rebuild only the recognizer: never tear down the microphone FGS on text edits. */
+    private fun reloadPhrase() {
+        phrase = Preferences.phrase(this)
+        if (assistantWindow || suspended) return // next scheduled restart uses the new phrase
+        suspended = true
+        worker.execute {
+            runCatching { engine?.close() }
+            engine = null
+            main.post {
+                if (!running) return@post
+                suspended = false
+                startEngine()
+            }
+        }
     }
 
     private fun startEngine() {
@@ -120,6 +142,7 @@ class WakeWordService : Service() {
     private fun triggered() {
         if (!running || suspended) return
         suspended = true
+        assistantWindow = true
         failures = 0
         // Release the microphone before starting the assistant.
         worker.execute {
@@ -133,6 +156,7 @@ class WakeWordService : Service() {
                 main.postDelayed({
                     if (running) {
                         suspended = false
+                        assistantWindow = false
                         startEngine()
                     }
                 }, ASSISTANT_WINDOW_MS)
@@ -220,6 +244,7 @@ class WakeWordService : Service() {
 
     companion object {
         private const val TAG = "HotwordService"
+        private const val ACTION_RELOAD = "dev.hotword.android.RELOAD_PHRASE"
         private const val CPU_LOCK_TIMEOUT_MS = 10 * 60_000L
         private const val CPU_LOCK_RENEW_MS = 9 * 60_000L
         private const val LISTENING_CHANNEL = "hotword_listener_v2"
@@ -236,6 +261,14 @@ class WakeWordService : Service() {
 
         fun start(context: Context) {
             context.startForegroundService(Intent(context, WakeWordService::class.java))
+        }
+
+        fun reload(context: Context) {
+            // This is sent only to an already-running FGS, while our settings Activity
+            // is visible. It does not create a microphone service from the background.
+            context.startService(
+                Intent(context, WakeWordService::class.java).setAction(ACTION_RELOAD)
+            )
         }
 
         fun stop(context: Context) {
