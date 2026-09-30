@@ -2,62 +2,49 @@
 
 [Русский](README.md) · **English**
 
-An experimental open-source Android app that recognizes a **user-configurable Russian trigger phrase** entirely on-device and attempts to open **whichever digital assistant is selected in Android settings**. It is not tied to Alice, Google, or any other assistant provider.
+An experimental open-source Android app that recognizes a **user-defined Russian trigger phrase** offline and attempts to invoke **whichever digital assistant Android has selected by default**. It is not tied to Alice, Gemini, or another assistant vendor.
 
-> **Experimental MVP:** Android may block assistant launches from a background app, particularly on a locked screen. A notification supplies a manual fallback. Fully hands-free operation on specific devices has not yet been verified.
+## Version 0.3 — automatic listening
 
-## Features
+- The Russian Vosk offline model is **bundled in the final APK**. On first opening, it is unpacked to private storage; no phone-side download or Internet permission is needed.
+- Once the model is prepared and microphone permission granted, listening **starts automatically**. There are no Start/Stop controls. The phrase is saved after a 1.5-second input pause, followed by a short service restart.
+- The app uses `ACTION_VOICE_COMMAND` **only when its handler belongs to the system-selected assistant**; otherwise it falls back to `ACTION_ASSIST`. After a detected phrase, our microphone is released for about 20 seconds so the assistant can listen.
+- Microphone and notification permissions are checked. The app reports Android's exposed battery optimization and background restrictions, and links to battery settings and compatible Xiaomi/HyperOS autostart settings.
+- The notification shade shows only a minimal persistent microphone-service notification. Android requires it for a long-running microphone foreground service. No per-detection debug notification is posted; error notifications appear only when necessary.
+- On device reboot or app update, a notification (when allowed) reminds the user to open the app and resume listening. Android 14+ prohibits starting a microphone foreground service directly from `BOOT_COMPLETED`.
 
-- A **Russian Vosk offline model bundled in the APK**. No download, import, or internet connection is necessary on the user's phone. At first launch the included ZIP is extracted into private app storage before listening is enabled.
-- Any user-configurable Russian trigger phrase (subject to Vosk model vocabulary and recognition quality). Restart listening to apply a changed phrase.
-- Fully local microphone processing. Audio is not saved or uploaded, and the application **does not request INTERNET permission**.
-- Vendor-neutral `Intent.ACTION_ASSIST` to invoke the Android-selected default assistant.
-- User-started microphone foreground service with a persistent notification and a Stop action; it releases the microphone for 20 seconds when the phrase is detected.
-- An insets-aware UI that avoids overlapping the status bar, camera cutouts and keyboard, including Android 15 / HyperOS edge-to-edge.
-- GitHub Actions unit tests and APK build; CI independently confirms that the **pinned SHA-256 model is embedded in the produced APK**.
+### First-time setup
 
-## Install and test
+1. Choose your default digital assistant in Android settings, and check that it accepts spoken commands.
+2. Install the APK and open the app. Wait for the bundled model to unpack, grant microphone permission (and preferably notifications); listening starts without a button.
+3. In battery settings, select **Unrestricted**. On HyperOS, open **Autostart** and allow the app to run in the background; also review its other vendor-specific restrictions.
+4. Change the trigger phrase as needed; it is applied automatically after a brief typing pause.
 
-1. Set your preferred default digital assistant in Android settings.
-2. Under **Actions → Android CI**, download the `hotword-debug-apk` artifact of a successful build. Unzip and install its APK.
-3. Launch the app and wait for the **local extraction** of the included model; free internal storage is required. The phone does not download anything.
-4. Enter a Russian phrase and tap **Test default assistant**. Grant microphone permission and tap **Start listening**.
-5. Test with this app foregrounded, another app in front, and the screen off. Use the fallback notification if Android blocks automatic launches.
+**Important:** There is **no public Android API** to read or change HyperOS's proprietary autostart toggle. The shortcut opens the relevant settings screen when available, otherwise the app details screen. Standard Android battery checks do **not** prove Xiaomi's additional restrictions are disabled.
 
-Start the service manually after reboot. Stop and restart listening to apply a new phrase.
+### Android platform limitations
 
-## Build from source
+This is an ordinary, non-privileged app. `ACTION_VOICE_COMMAND` and `ACTION_ASSIST` are public assistant entry points, but **neither guarantees** reproducing the exact SystemUI assist gesture or starting a voice session. Android's background activity launch and lock-screen restrictions may block the automatic assistant launch; the selected assistant itself determines its behavior. An error notification provides a user-initiated fallback when the explicit launch fails.
 
-Requirements: JDK 17, Android SDK Platform 35, Gradle 8.13. For repository size and third-party artifact management, the approximately 45 MB Russian model ZIP is **not committed to Git**. The following command retrieves it **on the build machine**, verifies a pinned SHA-256 and places it into the Android assets before packaging:
+**Truly unconditional always-on behavior is impossible to guarantee** for a third-party foreground microphone app: Android or the device vendor may stop the process, revoke microphone access, disable the microphone, or reboot. Android 14+ forbids a microphone foreground service started by a `BOOT_COMPLETED` receiver, regardless of Xiaomi's autostart setting. After a reboot the user must open the app at least once; a notification reminds them, if delivery is allowed.
+
+Continuous Vosk ASR is relatively power-hungry and may miss uncommon custom words or produce false triggers. A dedicated low-power detector can replace it later via the isolated `WakeWordEngine` interface.
+
+## Building
+
+Requires JDK 17, Android SDK 35, and Gradle 8.13. To keep Git lightweight and manage third-party assets, the Russian model ZIP is **not committed**; a build-time script downloads a pinned ZIP, verifies SHA-256, and packages it as an APK asset **on the build machine**. The resulting APK works fully offline.
 
 ```sh
 bash scripts/prepare-bundled-model.sh
 gradle :app:testDebugUnitTest :app:assembleDebug
 ```
 
-For an offline build machine, manually place the official `vosk-model-small-ru-0.22.zip` at `app/src/main/assets/models/ru.zip`; its checksum must match `models/ru.sha256`. Gradle rejects absent or invalid model assets. CI prepares and verifies the model automatically, then verifies the asset **inside the final APK**. Only the build machine needs the archive download; the distributed app is fully offline.
-
-## Limitations
-
-- `ACTION_ASSIST` cannot bypass Android background Activity launch restrictions, and the selected assistant may not start listening while the phone is locked. The manual notification fallback is not hands-free.
-- **Russian recognition only** for this MVP. Phrase customization does not imply multilingual recognition.
-- Continuous Vosk ASR is not low-power keyword spotting. Battery use, missed triggers and false positives need field testing.
-- First run needs free storage for local extraction. Xiaomi 14 / HyperOS locked-screen compatibility still needs device testing.
+For offline builds, put the official `vosk-model-small-ru-0.22.zip` in `app/src/main/assets/models/ru.zip`. Its SHA-256 is pinned in `models/ru.sha256` and Gradle verifies it. CI also verifies the bundled asset inside the built APK. Retrieve the debug APK under **Actions → Android CI → Artifacts → hotword-debug-apk**.
 
 ## Architecture
 
-```text
-Bundled APK asset (models/ru.zip) → ModelInstaller → Private storage
-                                                      ↓
-MainActivity → Preferences → WakeWordService → WakeWordEngine (Vosk)
-                                               ↓ trigger
-                                         release microphone
-                                               ↓
-                                    AssistantLauncher (ACTION_ASSIST)
-```
+`MainActivity` handles setup and automatic start; `DeviceSetup` checks public Android settings; `ModelInstaller` unpacks the asset locally; `WakeWordService` owns the microphone and limited recovery; `WakeWordEngine` isolates recognition; `AssistantLauncher` dispatches without vendor hardcoding; `BootReceiver` reminds the user after reboot.
 
-`WakeWordEngine` isolates recognition for future low-power engine alternatives. `ModelLanguage` provides an extensible language-model registry, currently with a single Russian entry. `AssistantLauncher` is vendor-agnostic.
+## Privacy and contributions
 
-## Contributing and licensing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contributions and device reports. Source code is [MIT](LICENSE). The embedded `vosk-model-small-ru-0.22` model is listed under **Apache 2.0** in the [Vosk model catalog](https://github.com/alphacep/vosk-space/blob/master/models.md). Vosk and other dependencies have their own licenses; distributors must observe applicable third-party terms.
+Audio is processed locally and is not stored; the app does not request `INTERNET`. Listening starts after microphone permission is granted, with Android's required visible microphone indicator. Users can revoke the microphone permission or force-stop the app from Android settings to stop listening. See [CONTRIBUTING.md](CONTRIBUTING.md). Source code is [MIT](LICENSE). The bundled Russian Vosk model is Apache 2.0; Vosk and other libraries have their own licenses.
