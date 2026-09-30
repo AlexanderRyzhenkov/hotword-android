@@ -2,6 +2,9 @@ package dev.hotword.android
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -15,8 +18,10 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
+import android.view.View
 import dev.hotword.android.assistant.AssistantLauncher
 import dev.hotword.android.audio.TriggerMatcher
+import dev.hotword.android.diagnostics.Diagnostics
 import dev.hotword.android.model.ModelInstaller
 import dev.hotword.android.service.WakeWordService
 import dev.hotword.android.settings.ModelLanguage
@@ -34,6 +39,17 @@ class MainActivity : Activity() {
     private lateinit var permissionStatus: TextView
     private lateinit var batteryStatus: TextView
     private lateinit var autostartStatus: TextView
+    private lateinit var overlayStatus: TextView
+    private lateinit var diagnosticsText: TextView
+    private var diagnosticsExpanded = false
+    private val refreshDiagnostics = object : Runnable {
+        override fun run() {
+            if (!resumed || !diagnosticsExpanded) return
+            diagnosticsText.text = Diagnostics.recent(this@MainActivity)
+                .ifBlank { getString(R.string.diagnostics_empty) }
+            ui.postDelayed(this, 2_000L)
+        }
+    }
     private var modelReady = false
     private var preparing = false
     private var resumed = false
@@ -92,6 +108,15 @@ class MainActivity : Activity() {
             setOnClickListener { DeviceSetup.openAutostartSettings(this@MainActivity) }
         })
 
+        overlayStatus = TextView(this).apply {
+            setPadding(0, gap / 2, 0, 0)
+        }
+        column.addView(overlayStatus)
+        column.addView(Button(this).apply {
+            text = getString(R.string.overlay_settings)
+            setOnClickListener { DeviceSetup.openOverlaySettings(this@MainActivity) }
+        })
+
         column.addView(Button(this).apply {
             text = getString(R.string.test_assistant)
             setOnClickListener {
@@ -103,6 +128,34 @@ class MainActivity : Activity() {
         column.addView(TextView(this).apply {
             text = getString(R.string.usage_warning)
             setPadding(0, gap, 0, 0)
+        })
+
+        column.addView(TextView(this).apply {
+            text = getString(R.string.diagnostics_heading)
+            textSize = 19f
+            setPadding(0, gap, 0, 0)
+        })
+        diagnosticsText = TextView(this).apply { visibility = View.GONE }
+        column.addView(diagnosticsText)
+        val diagnosticsButton = Button(this).apply { text = getString(R.string.diagnostics_show) }
+        diagnosticsButton.setOnClickListener {
+            diagnosticsExpanded = !diagnosticsExpanded
+            diagnosticsText.visibility = if (diagnosticsExpanded) View.VISIBLE else View.GONE
+            diagnosticsButton.text = getString(
+                if (diagnosticsExpanded) R.string.diagnostics_hide else R.string.diagnostics_show
+            )
+            ui.removeCallbacks(refreshDiagnostics)
+            if (diagnosticsExpanded && resumed) refreshDiagnostics.run()
+        }
+        column.addView(diagnosticsButton)
+        column.addView(Button(this).apply {
+            text = getString(R.string.diagnostics_copy)
+            setOnClickListener {
+                val text = Diagnostics.recent(this@MainActivity)
+                (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                    .setPrimaryClip(ClipData.newPlainText("Hotword diagnostics", text))
+                Toast.makeText(this@MainActivity, R.string.diagnostics_copied, Toast.LENGTH_SHORT).show()
+            }
         })
 
         val scroll = ScrollView(this).apply {
@@ -140,7 +193,11 @@ class MainActivity : Activity() {
         super.onResume()
         resumed = true
         updateChecks()
-        if (modelReady) ensureListening()
+        if (modelReady) {
+            ensureListening()
+            WakeWordService.refreshOverlay(this)
+        }
+        if (diagnosticsExpanded) refreshDiagnostics.run()
     }
 
     override fun onPause() {
@@ -149,6 +206,7 @@ class MainActivity : Activity() {
         phraseApply = null
         if (::input.isInitialized) applyPhrase(input.text.toString().trim())
         resumed = false
+        ui.removeCallbacks(refreshDiagnostics)
         super.onPause()
     }
 
@@ -254,6 +312,10 @@ class MainActivity : Activity() {
             else getString(R.string.background_not_restricted)
         )
         autostartStatus.text = getString(R.string.autostart_unverifiable)
+        overlayStatus.text = getString(
+            if (DeviceSetup.overlayAllowed(this)) R.string.overlay_granted
+            else R.string.overlay_missing
+        )
     }
 
     override fun onRequestPermissionsResult(
