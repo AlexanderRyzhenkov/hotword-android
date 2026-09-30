@@ -22,7 +22,7 @@ First use the in-app assistant test button to isolate dispatch problems from rec
 ## Version 0.3 — automatic listening
 
 - The Russian Vosk offline model is **bundled in the final APK**. On first opening, it is unpacked to private storage; no phone-side download or Internet permission is needed.
-- Once the model is prepared and microphone permission granted, listening **starts automatically**. There are no Start/Stop controls. The phrase is saved after a 1.5-second input pause, followed by a short service restart.
+- Once the model is prepared and microphone permission granted, listening **starts automatically**. There are no Start/Stop controls. The phrase is saved after a 1.5-second input pause; only recognition reloads inside the existing foreground service without stopping it.
 - Assistant dispatch uses an explicit `ACTION_ASSIST` activity belonging to the selected assistant, with a package-scoped `ACTION_VOICE_COMMAND` fallback. An implicit all-assistants chooser is intentionally never opened. Recognition pauses for about 20 seconds after a trigger.
 - Microphone and notification permissions are checked. The app reports Android's exposed battery optimization and background restrictions, and links to battery settings and compatible Xiaomi/HyperOS autostart settings.
 - The notification shade shows only a minimal persistent microphone-service notification. Android requires it for a long-running microphone foreground service. No per-detection debug notification is posted; error notifications appear only when necessary.
