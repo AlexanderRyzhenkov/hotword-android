@@ -71,6 +71,16 @@ If the process still crashes, the app now stores only the exception type and the
 
 The quicker rearming from 0.3.2 remains: Vosk stays loaded and only microphone capture is temporarily released while the selected assistant is using it.
 
+## 0.3.4 diagnostics: recognized hotword but no assistant UI
+
+`Trigger phrase detected`, `Assistant intent accepted without exception`, followed by `Recognizer listening` **do not prove** that Android displayed the default assistant. `startActivity` may return normally while background launch is suppressed by the operating system.
+
+Each trigger now records four diagnostic signals: `appVisible` (whether Hotword's Activity is resumed), `screenOn`, `locked`, and `overlayGranted` (whether Android's optional Display over other apps special access is enabled). No audio or recognized words are stored. The last 30 lifecycle events are retained locally.
+
+**Test:** grant Display over other apps if desired, then test once while Hotword is foregrounded, once on Home, and once with the screen off. Copy Local diagnostics after these tests. If `overlayGranted=true` and hotword recognition succeeds but the assistant does not display while Hotword is backgrounded, the current public Intent entry point is inadequate on this Android/HyperOS configuration. A third-party app cannot guarantee a faithful SystemUI assistant-gesture invocation without platform privileges.
+
+This is a diagnostic release, **not a claim that Android's background launch restrictions have been overcome**. Fast rearming and the APK-bundled offline model are unchanged.
+
 ## Building
 
 Requires JDK 17, Android SDK 35, and Gradle 8.13. To keep Git lightweight and manage third-party assets, the Russian model ZIP is **not committed**; a build-time script downloads a pinned ZIP, verifies SHA-256, and packages it as an APK asset **on the build machine**. The resulting APK works fully offline.
