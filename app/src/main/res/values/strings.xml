@@ -23,7 +23,7 @@
     <string name="open_assistant">Open assistant</string>
     <string name="error_notification">Listening error: %1$s</string>
     <string name="notification_channel">Voice trigger service</string>
-    <string name="usage_warning">The microphone listens locally using the bundled Russian model. Background assistant launches may require the optional Android display-over-apps permission. A small visible status dot is shown when it is enabled; Android can still restrict launching on the lock screen. Repeated commands should normally become available around 3 seconds after activation, or after the assistant releases the microphone.</string>
+    <string name="usage_warning">The microphone listens locally using the bundled Russian model. Background assistant launches may require the optional Android display-over-apps permission. Hotword does not create an overlay window or draw over your apps. Android or the selected assistant can still restrict lock-screen launch. Repeated commands normally become available around 3 seconds after activation, or after the assistant releases the microphone.</string>
     <string name="phrase_apply_hint">The phrase is applied automatically after you pause typing.</string>
     <string name="setup_heading">Permissions and background operation</string>
     <string name="permission_check">Microphone: %1$s   Notifications: %2$s</string>
@@ -48,8 +48,8 @@
     <string name="boot_title">Resume Hotword Android</string>
     <string name="boot_message">Android requires opening the app after reboot to resume microphone access.</string>
     <string name="overlay_settings">Allow display over other apps (optional background launch)</string>
-    <string name="overlay_missing">Background launch: extra permission is needed. Android may silently block automatic assistant activation outside this app. Opting in shows a small status dot over other apps. This does not guarantee access through the lock screen.</string>
-    <string name="overlay_granted">Display over other apps: granted. A small status dot will be visible while Hotword is listening. Lock-screen behavior still depends on Android/HyperOS.</string>
+    <string name="overlay_missing">Background launch permission is not granted. Android may silently block automatic assistant activation outside this app. Granting this special access does not make Hotword draw anything over other apps and does not guarantee lock-screen launch.</string>
+    <string name="overlay_granted">Display over other apps: granted for background assistant launch eligibility. Hotword does not create an overlay window. Lock-screen behavior still depends on Android/HyperOS and the selected assistant.</string>
     <string name="diagnostics_heading">Local diagnostics</string>
     <string name="diagnostics_show">Show recent events</string>
     <string name="diagnostics_hide">Hide events</string>
