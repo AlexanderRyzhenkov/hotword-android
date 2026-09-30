@@ -45,6 +45,22 @@ This is an ordinary, non-privileged app. `ACTION_VOICE_COMMAND` and `ACTION_ASSI
 
 Continuous Vosk ASR is relatively power-hungry and may miss uncommon custom words or produce false triggers. A dedicated low-power detector can replace it later via the isolated `WakeWordEngine` interface.
 
+## Version 0.3.2: background dispatch and quicker rearming
+
+On Android 10+, starting another application's Activity from a foreground microphone service may be **silently blocked** when Hotword is not visible, even if the hotword was recognized. A CPU wake lock keeps recognition running but **does not grant background activity launch privileges**. The configured default assistant remains unchanged.
+
+An optional experiment to allow automatic dispatch while other apps are visible:
+
+1. Open Hotword and explicitly grant the special **Display over other apps** permission in its settings screen. The app never enables this permission itself.
+2. While recognition is active, a **small visible status dot** appears along the screen edge. It does not intercept touches or inspect window content. Android 15 may require a genuinely visible overlay, not just the permission, for background launches.
+3. Retest on Home and within other apps. **The lock screen may cover application overlays**, so truly hands-free locked-screen activation cannot yet be guaranteed on all Android/HyperOS versions. A system-privileged assistant entry point or another approach may be necessary.
+
+Previous versions destroyed/reloaded Vosk and waited a **fixed 20 seconds** after each trigger. The model is now retained in memory: only capture is temporarily paused. The service checks available Android recording-status information and normally resumes after about **3 seconds if no other app begins recording**, or **0.8 seconds after external recording stops**, with a 30-second fail-safe. Some devices conceal other apps' recording status, so the fallback may occasionally contend for the microphone.
+
+A collapsible **Local diagnostics** section records only lifecycle events, including phrase detection, launch requests, and microphone rearming. Use **Copy recent events** to distinguish a missed wake word from a launch blocked by Android. No audio or recognized text is stored. The mandatory microphone foreground notification stays minimal.
+
+**Note:** opt out of overlay access if you do not want a small always-visible status dot over other apps. Without it, Android may block dispatch while Hotword is in the background. Xiaomi 14 lock-screen behavior requires fresh device testing.
+
 ## Building
 
 Requires JDK 17, Android SDK 35, and Gradle 8.13. To keep Git lightweight and manage third-party assets, the Russian model ZIP is **not committed**; a build-time script downloads a pinned ZIP, verifies SHA-256, and packages it as an APK asset **on the build machine**. The resulting APK works fully offline.

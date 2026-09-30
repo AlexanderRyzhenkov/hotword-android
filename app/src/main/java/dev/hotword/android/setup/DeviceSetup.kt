@@ -28,6 +28,14 @@ object DeviceSetup {
         context.getSystemService(PowerManager::class.java)
             .isIgnoringBatteryOptimizations(context.packageName)
 
+    /** Special permission, always opt-in; cannot be granted by the app. */
+    fun overlayAllowed(context: Context): Boolean = Settings.canDrawOverlays(context)
+
+    fun openOverlaySettings(context: Context) = openFirst(context, listOf(
+        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:" + context.packageName)), appDetails(context)
+    ))
+
     fun backgroundRestricted(context: Context) =
         Build.VERSION.SDK_INT >= 28 &&
             context.getSystemService(ActivityManager::class.java).isBackgroundRestricted
