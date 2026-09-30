@@ -53,13 +53,11 @@ class WakeWordService : Service() {
     }
     private var phrase = "" // main thread, reloaded without destroying the foreground service
     private var assistantWindow = false // main thread
-    private lateinit var overlay: AssistantOverlay
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
-        overlay = AssistantOverlay(this)
         val notifications = getSystemService(NotificationManager::class.java)
         notifications.createNotificationChannel(NotificationChannel(
             LISTENING_CHANNEL, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW
@@ -70,11 +68,6 @@ class WakeWordService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_REFRESH_OVERLAY && running) {
-            overlay.sync()
-            Diagnostics.record(this, "Overlay window attached: " + overlay.isAttached)
-            return START_STICKY
-        }
         if (intent?.action == ACTION_RELOAD && running) {
             reloadPhrase()
             return START_STICKY
@@ -103,8 +96,7 @@ class WakeWordService : Service() {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, packageName + ":HotwordListening")
             .apply { setReferenceCounted(false) }
         renewCpuLock.run()
-        overlay.sync() // Only creates a status dot after explicit user approval.
-        Diagnostics.record(this, "Foreground microphone service started; overlay attached: " + overlay.isAttached)
+        Diagnostics.record(this, "Foreground microphone service started")
         startEngine()
         // A system-managed restart may recover after process eviction, but is not
         // a bypass for force-stop, boot or OEM microphone/background restrictions.
@@ -172,7 +164,6 @@ class WakeWordService : Service() {
             runCatching { engine?.pause() }
             main.post {
                 if (!running) return@post
-                overlay.sync()
                 val attempted = AssistantLauncher.launch(this)
                 Diagnostics.record(
                     this,
@@ -287,7 +278,6 @@ class WakeWordService : Service() {
         main.removeCallbacksAndMessages(null)
         runCatching { cpuLock?.takeIf { it.isHeld }?.release() }
         cpuLock = null
-        overlay.remove()
         worker.execute {
             runCatching { engine?.close() }
             engine = null
@@ -299,7 +289,6 @@ class WakeWordService : Service() {
     companion object {
         private const val TAG = "HotwordService"
         private const val ACTION_RELOAD = "dev.hotword.android.RELOAD_PHRASE"
-        private const val ACTION_REFRESH_OVERLAY = "dev.hotword.android.REFRESH_OVERLAY"
         private const val CPU_LOCK_TIMEOUT_MS = 10 * 60_000L
         private const val CPU_LOCK_RENEW_MS = 9 * 60_000L
         private const val LISTENING_CHANNEL = "hotword_listener_v2"
@@ -324,14 +313,6 @@ class WakeWordService : Service() {
             context.startService(
                 Intent(context, WakeWordService::class.java).setAction(ACTION_RELOAD)
             )
-        }
-
-        fun refreshOverlay(context: Context) {
-            if (isActive) {
-                context.startService(
-                    Intent(context, WakeWordService::class.java).setAction(ACTION_REFRESH_OVERLAY)
-                )
-            }
         }
 
         fun stop(context: Context) {
