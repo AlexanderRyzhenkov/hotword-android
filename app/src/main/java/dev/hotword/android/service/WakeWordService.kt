@@ -2,6 +2,7 @@ package dev.hotword.android.service
 
 import android.Manifest
 import android.app.Notification
+import android.app.KeyguardManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -20,6 +21,8 @@ import dev.hotword.android.MainActivity
 import dev.hotword.android.R
 import dev.hotword.android.assistant.AssistantLauncher
 import dev.hotword.android.diagnostics.Diagnostics
+import dev.hotword.android.diagnostics.AppVisibility
+import dev.hotword.android.setup.DeviceSetup
 import dev.hotword.android.audio.VoskWakeWordEngine
 import dev.hotword.android.audio.WakeWordEngine
 import dev.hotword.android.model.ModelInstaller
@@ -158,7 +161,14 @@ class WakeWordService : Service() {
         suspended = true
         assistantWindow = true
         failures = 0
-        Diagnostics.record(this, "Trigger phrase detected")
+        val screenOn = getSystemService(PowerManager::class.java).isInteractive
+        val locked = getSystemService(KeyguardManager::class.java).isKeyguardLocked
+        val overlayAllowed = DeviceSetup.overlayAllowed(this)
+        Diagnostics.record(
+            this,
+            "Trigger detected: appVisible=${AppVisibility.isActivityResumed}, " +
+                "screenOn=$screenOn, locked=$locked, overlayGranted=$overlayAllowed"
+        )
         // The Vosk Model stays warm. Only SpeechService/AudioRecord are released.
         worker.execute {
             runCatching { engine?.pause() }
@@ -167,8 +177,8 @@ class WakeWordService : Service() {
                 val attempted = AssistantLauncher.launch(this)
                 Diagnostics.record(
                     this,
-                    if (attempted) "Selected assistant launch requested (OS may block it)"
-                    else "Selected assistant has no usable handler"
+                    if (attempted) "Assistant intent accepted without exception; visibility NOT verified"
+                    else "Assistant intent failed: no handler or an exception"
                 )
                 if (!attempted) {
                     showFailure(getString(R.string.assistant_launch_failed), assistantAction = true)

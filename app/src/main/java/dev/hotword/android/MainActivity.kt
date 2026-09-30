@@ -22,6 +22,7 @@ import android.view.View
 import dev.hotword.android.assistant.AssistantLauncher
 import dev.hotword.android.audio.TriggerMatcher
 import dev.hotword.android.diagnostics.Diagnostics
+import dev.hotword.android.diagnostics.AppVisibility
 import dev.hotword.android.model.ModelInstaller
 import dev.hotword.android.service.WakeWordService
 import dev.hotword.android.settings.ModelLanguage
@@ -192,6 +193,7 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         resumed = true
+        AppVisibility.isActivityResumed = true
         updateChecks()
         if (modelReady) ensureListening()
         if (diagnosticsExpanded) refreshDiagnostics.run()
@@ -203,6 +205,7 @@ class MainActivity : Activity() {
         phraseApply = null
         if (::input.isInitialized) applyPhrase(input.text.toString().trim())
         resumed = false
+        AppVisibility.isActivityResumed = false
         ui.removeCallbacks(refreshDiagnostics)
         super.onPause()
     }
@@ -328,6 +331,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        AppVisibility.isActivityResumed = false
         phraseApply?.let(ui::removeCallbacks)
         super.onDestroy()
     }
