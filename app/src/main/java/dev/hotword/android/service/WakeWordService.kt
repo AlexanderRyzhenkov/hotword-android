@@ -9,6 +9,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
+import android.os.SystemClock
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -17,6 +19,7 @@ import android.util.Log
 import dev.hotword.android.MainActivity
 import dev.hotword.android.R
 import dev.hotword.android.assistant.AssistantLauncher
+import dev.hotword.android.diagnostics.Diagnostics
 import dev.hotword.android.audio.VoskWakeWordEngine
 import dev.hotword.android.audio.WakeWordEngine
 import dev.hotword.android.model.ModelInstaller
@@ -50,11 +53,13 @@ class WakeWordService : Service() {
     }
     private var phrase = "" // main thread, reloaded without destroying the foreground service
     private var assistantWindow = false // main thread
+    private lateinit var overlay: AssistantOverlay
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        overlay = AssistantOverlay(this)
         val notifications = getSystemService(NotificationManager::class.java)
         notifications.createNotificationChannel(NotificationChannel(
             LISTENING_CHANNEL, getString(R.string.notification_channel), NotificationManager.IMPORTANCE_LOW
@@ -65,6 +70,10 @@ class WakeWordService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_REFRESH_OVERLAY && running) {
+            overlay.sync()
+            return START_STICKY
+        }
         if (intent?.action == ACTION_RELOAD && running) {
             reloadPhrase()
             return START_STICKY
@@ -91,6 +100,8 @@ class WakeWordService : Service() {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, packageName + ":HotwordListening")
             .apply { setReferenceCounted(false) }
         renewCpuLock.run()
+        overlay.sync() // Only creates a status dot after explicit user approval.
+        Diagnostics.record(this, "Foreground microphone service started")
         startEngine()
         // A system-managed restart may recover after process eviction, but is not
         // a bypass for force-stop, boot or OEM microphone/background restrictions.
@@ -103,11 +114,12 @@ class WakeWordService : Service() {
         if (assistantWindow || suspended) return // next scheduled restart uses the new phrase
         suspended = true
         worker.execute {
-            runCatching { engine?.close() }
-            engine = null
+            runCatching { engine?.pause() }
+            runCatching { engine?.updatePhrase(phrase) }
             main.post {
                 if (!running) return@post
                 suspended = false
+                Diagnostics.record(this, "Trigger phrase changed; reloading audio only")
                 startEngine()
             }
         }
@@ -118,18 +130,25 @@ class WakeWordService : Service() {
         worker.execute {
             if (!running || suspended) return@execute
             try {
-                val next = VoskWakeWordEngine(
-                    ModelInstaller.destination(this, ModelLanguage.RUSSIAN), phrase
-                )
-                engine = next
+                val existing = engine
                 lastEngineStart = System.currentTimeMillis()
-                next.start(
-                    onTrigger = { main.post { triggered() } },
-                    onError = { main.post { failed(it) } }
-                )
+                if (existing != null) {
+                    existing.updatePhrase(phrase)
+                    existing.resume()
+                } else {
+                    val next = VoskWakeWordEngine(
+                        ModelInstaller.destination(this, ModelLanguage.RUSSIAN), phrase
+                    )
+                    engine = next
+                    next.start(
+                        onTrigger = { main.post { triggered() } },
+                        onError = { main.post { failed(it) } }
+                    )
+                }
                 if (!running || suspended) {
-                    next.close()
-                    if (engine === next) engine = null
+                    engine?.pause()
+                } else {
+                    Diagnostics.record(this, "Recognizer listening")
                 }
             } catch (error: Throwable) {
                 runCatching { engine?.close() }
@@ -144,28 +163,58 @@ class WakeWordService : Service() {
         suspended = true
         assistantWindow = true
         failures = 0
-        // Release the microphone before starting the assistant.
+        Diagnostics.record(this, "Trigger phrase detected")
+        // The Vosk Model stays warm. Only SpeechService/AudioRecord are released.
         worker.execute {
-            runCatching { engine?.close() }
-            engine = null
+            runCatching { engine?.pause() }
             main.post {
                 if (!running) return@post
-                if (!AssistantLauncher.launch(this)) {
+                overlay.sync()
+                val attempted = AssistantLauncher.launch(this)
+                Diagnostics.record(
+                    this,
+                    if (attempted) "Selected assistant launch requested (OS may block it)"
+                    else "Selected assistant has no usable handler"
+                )
+                if (!attempted) {
                     showFailure(getString(R.string.assistant_launch_failed), assistantAction = true)
                 }
-                main.postDelayed({
-                    if (running) {
-                        suspended = false
-                        assistantWindow = false
-                        startEngine()
-                    }
-                }, ASSISTANT_WINDOW_MS)
+                waitForAssistantMicrophone()
             }
         }
     }
 
+    /**
+     * A fixed 20-second cooldown made wake words seem broken after every launch.
+     * Check when the assistant starts/stops recording (where Android reports it).
+     * If the system hides other apps' recordings, resume after 3 seconds instead.
+     */
+    private fun waitForAssistantMicrophone() {
+        val manager = getSystemService(AudioManager::class.java)
+        val policy = RecognitionResumePolicy(SystemClock.elapsedRealtime())
+        val poll = object : Runnable {
+            override fun run() {
+                if (!running || !assistantWindow) return
+                val externalRecording = runCatching {
+                    // Our own AudioRecord has already been stopped on worker.
+                    manager.activeRecordingConfigurations.isNotEmpty()
+                }.getOrDefault(false)
+                if (policy.shouldResume(SystemClock.elapsedRealtime(), externalRecording)) {
+                    assistantWindow = false
+                    suspended = false
+                    Diagnostics.record(this@WakeWordService, "Microphone handoff complete; resuming recognition")
+                    startEngine()
+                } else {
+                    main.postDelayed(this, AUDIO_POLL_MS)
+                }
+            }
+        }
+        main.postDelayed(poll, AUDIO_POLL_MS)
+    }
+
     private fun failed(error: Throwable) {
         if (!running || suspended) return
+        Diagnostics.record(this, "Recognition error: " + error.javaClass.simpleName)
         if (System.currentTimeMillis() - lastEngineStart > STABLE_RESET_MS) failures = 0
         failures++
         suspended = true
@@ -234,6 +283,7 @@ class WakeWordService : Service() {
         main.removeCallbacksAndMessages(null)
         runCatching { cpuLock?.takeIf { it.isHeld }?.release() }
         cpuLock = null
+        overlay.remove()
         worker.execute {
             runCatching { engine?.close() }
             engine = null
@@ -245,13 +295,14 @@ class WakeWordService : Service() {
     companion object {
         private const val TAG = "HotwordService"
         private const val ACTION_RELOAD = "dev.hotword.android.RELOAD_PHRASE"
+        private const val ACTION_REFRESH_OVERLAY = "dev.hotword.android.REFRESH_OVERLAY"
         private const val CPU_LOCK_TIMEOUT_MS = 10 * 60_000L
         private const val CPU_LOCK_RENEW_MS = 9 * 60_000L
         private const val LISTENING_CHANNEL = "hotword_listener_v2"
         private const val ALERT_CHANNEL = "hotword_attention"
         private const val NOTIFICATION_ID = 100
         private const val ALERT_ID = 101
-        private const val ASSISTANT_WINDOW_MS = 20_000L
+        private const val AUDIO_POLL_MS = 350L
         private const val STABLE_RESET_MS = 60_000L
         private const val RECOVERY_DELAY_MS = 5_000L
         private const val MAX_RECOVERY_ATTEMPTS = 4
@@ -269,6 +320,14 @@ class WakeWordService : Service() {
             context.startService(
                 Intent(context, WakeWordService::class.java).setAction(ACTION_RELOAD)
             )
+        }
+
+        fun refreshOverlay(context: Context) {
+            if (isActive) {
+                context.startService(
+                    Intent(context, WakeWordService::class.java).setAction(ACTION_REFRESH_OVERLAY)
+                )
+            }
         }
 
         fun stop(context: Context) {
