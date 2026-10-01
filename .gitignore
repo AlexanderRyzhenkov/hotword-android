@@ -8,6 +8,12 @@
 *.apk
 *.aab
 *.keystore
-# Verified offline model is downloaded on CI/developer machine and packaged into the APK.
+
+# Pinned PocketSphinx build inputs are downloaded on CI/developer machines.
+/app/libs/*.aar
+/app/libs/*.part
+/app/src/main/assets/pocketsphinx/ru/
+
+# Legacy generated Vosk assets, if present locally.
 /app/src/main/assets/models/*.zip
 /app/src/main/assets/models/*.part
