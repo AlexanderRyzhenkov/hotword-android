@@ -43,6 +43,12 @@ object RussianPronunciation {
         .replace(Regex("\\s+"), " ")
 
     fun isSupported(raw: String): Boolean {
+        // Punctuation is fine, but silently dropping Latin letters/digits would
+        // make the configured wake phrase differ from what the user entered.
+        if (raw.any { it.isDigit() }) return false
+        if (raw.any { ch ->
+                ch.isLetter() && ch.lowercaseChar() !in 'а'..'я' && ch.lowercaseChar() != 'ё'
+            }) return false
         val normalized = normalizePhrase(raw)
         if (normalized.isBlank()) return false
         return normalized.split(' ').all { validWord.matches(it) }
