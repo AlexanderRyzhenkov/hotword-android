@@ -42,5 +42,5 @@ object Preferences {
 
 /** This registry can later be extended with other APK-bundled language models. */
 enum class ModelLanguage(val code: String, val bundledAsset: String) {
-    RUSSIAN("ru", "models/ru.zip")
+    RUSSIAN("ru", "pocketsphinx/ru")
 }
