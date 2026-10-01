@@ -23,7 +23,7 @@ import android.widget.TextView
 import android.widget.Toast
 import dev.hotword.android.assistant.AssistantLauncher
 import dev.hotword.android.audio.TriggerChime
-import dev.hotword.android.audio.TriggerMatcher
+import dev.hotword.android.audio.RussianPronunciation
 import dev.hotword.android.diagnostics.AppVisibility
 import dev.hotword.android.diagnostics.Diagnostics
 import dev.hotword.android.model.ModelInstaller
@@ -337,7 +337,7 @@ class MainActivity : Activity() {
     private fun applyPhrase(raw: String) {
         val phrase = raw.trim()
         if (phrase == Preferences.phrase(this)) return
-        if (phrase.length > 100 || TriggerMatcher.normalize(phrase).isBlank()) {
+        if (phrase.length > 100 || !RussianPronunciation.isSupported(phrase)) {
             status.text = getString(R.string.phrase_invalid)
             return
         }
