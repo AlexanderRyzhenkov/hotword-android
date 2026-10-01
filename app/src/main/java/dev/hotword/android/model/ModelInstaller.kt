@@ -36,6 +36,7 @@ object ModelInstaller {
     /** Runs on a worker thread; synchronization protects activity recreation. */
     @Synchronized
     fun ensureInstalled(context: Context, language: ModelLanguage, progress: (Int) -> Unit) {
+        cleanupLegacyVosk(context)
         if (isInstalled(context, language)) return
         val target = destination(context, language)
         val parent = target.parentFile ?: throw IOException("Model directory unavailable")
@@ -78,6 +79,16 @@ object ModelInstaller {
             throw IOException("Bundled PocketSphinx model preparation failed: " + error.message, error)
         } finally {
             stage.deleteRecursively()
+        }
+    }
+
+    /** Previous releases unpacked Vosk under files/models/ru; it is unused now. */
+    private fun cleanupLegacyVosk(context: Context) {
+        val legacy = File(context.filesDir, "models/ru")
+        if (legacy.exists()) runCatching { legacy.deleteRecursively() }
+        val parent = legacy.parentFile
+        if (parent?.isDirectory == true && parent.listFiles()?.isEmpty() == true) {
+            runCatching { parent.delete() }
         }
     }
 }
