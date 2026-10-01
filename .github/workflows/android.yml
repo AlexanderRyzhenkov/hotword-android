@@ -23,24 +23,46 @@ jobs:
           gradle-version: '8.13'
       - name: Install Android platform
         run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
-      - name: Prepare pinned Russian model at build time
-        run: bash scripts/prepare-bundled-model.sh
+      - name: Cache pinned PocketSphinx build inputs
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/libs/pocketsphinx-android-5prealpha-release.aar
+            app/src/main/assets/pocketsphinx/ru
+          key: pocketsphinx-v1-${{ runner.os }}-${{ hashFiles('models/pocketsphinx-ru.sha256', 'scripts/prepare-pocketsphinx.sh') }}
+      - name: Prepare PocketSphinx and Russian acoustic model
+        run: bash scripts/prepare-pocketsphinx.sh
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --stacktrace
       - name: Assemble APK
         run: gradle :app:assembleDebug --stacktrace
-      - name: Verify APK contains the correct offline model
+      - name: Verify APK contains PocketSphinx and no Vosk model
         run: |
           python3 - <<'PY'
-          import hashlib
           import pathlib
           import zipfile
+
           apk = pathlib.Path('app/build/outputs/apk/debug/app-debug.apk')
-          expected = pathlib.Path('models/ru.sha256').read_text().strip()
+          required = {
+              'assets/pocketsphinx/ru/feat.params',
+              'assets/pocketsphinx/ru/feature_transform',
+              'assets/pocketsphinx/ru/mdef',
+              'assets/pocketsphinx/ru/means',
+              'assets/pocketsphinx/ru/mixture_weights',
+              'assets/pocketsphinx/ru/noisedict',
+              'assets/pocketsphinx/ru/transition_matrices',
+              'assets/pocketsphinx/ru/variances',
+          }
           with zipfile.ZipFile(apk) as archive:
-              model = archive.read('assets/models/ru.zip')
-          assert hashlib.sha256(model).hexdigest() == expected, "Model missing or damaged"
-          print(f"Verified bundled model: {len(model)/1024/1024:.1f} MiB")
+              names = set(archive.namelist())
+              missing = required - names
+              assert not missing, f'Missing PocketSphinx assets: {sorted(missing)}'
+              assert 'assets/models/ru.zip' not in names, 'Legacy Vosk model is still bundled'
+              native = [n for n in names if n.endswith('/libpocketsphinx_jni.so')]
+              assert native, 'PocketSphinx JNI library missing from APK'
+              size = sum(archive.getinfo(n).file_size for n in required)
+          print(f'PocketSphinx acoustic assets: {size / 1024 / 1024:.1f} MiB')
+          print('PocketSphinx JNI:', ', '.join(native))
           PY
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
