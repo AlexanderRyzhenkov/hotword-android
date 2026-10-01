@@ -1,59 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Hotword Android</string>
+    <string name="app_name">Hotword</string>
+    <string name="app_tagline">Офлайн-активация системного голосового помощника Android</string>
+
     <string name="phrase_label">Ключевая фраза</string>
     <string name="phrase_hint">Например: привет помощник</string>
-    <string name="language_russian_only">Язык распознавания: русский (встроенная офлайн-модель)</string>
-    <string name="model_preparing">Подготовка встроенной модели…</string>
-    <string name="model_preparing_files">Распаковка встроенной модели: %1$d файлов…</string>
-    <string name="model_ready">Русская офлайн-модель готова</string>
-    <string name="model_prepare_error">Не удалось подготовить встроенную модель: %1$s</string>
-    <string name="retry_preparing">Повторить подготовку</string>
-    <string name="start">Начать прослушивание</string>
-    <string name="stop">Остановить</string>
-    <string name="test_assistant">Проверить системного помощника</string>
+    <string name="phrase_apply_hint">Изменения применяются автоматически после небольшой паузы.</string>
     <string name="phrase_invalid">Введите русскую фразу длиной до 100 символов</string>
-    <string name="assistant_error">Не удалось открыть выбранного помощника</string>
-    <string name="start_error">Не удалось запустить микрофон</string>
-    <string name="start_requested">Сервис запускается. Проверьте постоянное уведомление.</string>
-    <string name="stopped">Прослушивание остановлено</string>
-    <string name="mic_required">Необходимо разрешить доступ к микрофону</string>
-    <string name="listening">Ожидание фразы: %1$s</string>
-    <string name="triggered">Фраза распознана. Нажмите для запуска помощника, если нужно.</string>
-    <string name="open_assistant">Открыть помощника</string>
-    <string name="error_notification">Ошибка распознавания: %1$s</string>
-    <string name="notification_channel">Сервис голосовой активации</string>
-    <string name="usage_warning">Микрофон обрабатывается локально. Для автоматического запуска помощника из фона может понадобиться необязательное разрешение «Поверх других окон». Само приложение ничего поверх других окон не рисует. На экране блокировки ограничения Android, HyperOS или выбранного помощника могут сохраниться. Повторное срабатывание обычно возможно примерно через три секунды либо после освобождения микрофона помощником.</string>
-    <string name="phrase_apply_hint">Фраза применяется автоматически после небольшой паузы во время ввода.</string>
-    <string name="setup_heading">Разрешения и работа в фоне</string>
-    <string name="permission_check">Микрофон: %1$s   Уведомления: %2$s</string>
-    <string name="app_settings">Разрешения приложения</string>
-    <string name="battery_check">Исключение из оптимизации Android: %1$s. Фоновые ограничения: %2$s. У HyperOS есть отдельные ограничения.</string>
-    <string name="battery_exempt">есть</string>
-    <string name="battery_restricted">нет</string>
-    <string name="background_restricted">обнаружены</string>
-    <string name="background_not_restricted">не обнаружены</string>
-    <string name="battery_settings">Открыть настройки батареи</string>
-    <string name="autostart_unverifiable">Android не позволяет программно проверить автозапуск HyperOS. Разрешите его вручную, а также выберите режим батареи «Без ограничений».</string>
-    <string name="autostart_settings">Открыть настройки автозапуска</string>
-    <string name="active_preparing">Подготовка автоматического прослушивания…</string>
-    <string name="running">Прослушивание работает в фоне</string>
-    <string name="restarting">Смена фразы: перезапуск прослушивания…</string>
-    <string name="listener_active">Голосовая активация включена</string>
-    <string name="alert_channel">Ошибки Hotword</string>
-    <string name="assistant_launch_failed">Не удалось автоматически открыть помощника. Нажмите для повторной попытки.</string>
-    <string name="listener_failed">Прослушивание остановлено после повторных ошибок: %1$s</string>
-    <string name="attention_required">Hotword требует внимания</string>
-    <string name="boot_channel">Возобновление активации</string>
-    <string name="boot_title">Возобновите работу Hotword Android</string>
-    <string name="boot_message">Android требует открыть приложение после перезагрузки, чтобы возобновить работу микрофона.</string>
-    <string name="overlay_settings">Разрешить отображение поверх окон (для вызова из фона)</string>
-    <string name="overlay_missing">Разрешение для фонового запуска не выдано. Android может молча блокировать вызов помощника, когда Hotword не открыт. Выдача специального доступа не заставляет Hotword рисовать что-либо поверх приложений и не гарантирует работу на экране блокировки.</string>
-    <string name="overlay_granted">Разрешение «Поверх других окон» выдано для допуска фонового запуска. Hotword не создаёт поверх приложений никаких окон. Экран блокировки всё ещё зависит от Android, HyperOS и выбранного помощника.</string>
-    <string name="diagnostics_heading">Локальная диагностика</string>
+
+    <string name="trigger_sound">Звуковой сигнал после распознавания фразы</string>
+
+    <string name="setup_heading">Необходимая настройка</string>
+    <string name="setup_ready">Все необходимые разрешения и системные настройки включены.</string>
+    <string name="setup_needs_attention">Завершите пункты ниже. После этого прослушивание запустится автоматически.</string>
+    <string name="setup_item_ready">✓ %1$s</string>
+    <string name="setup_item_missing">○ %1$s</string>
+    <string name="setup_fix">Настроить</string>
+    <string name="setup_microphone">Доступ к микрофону</string>
+    <string name="setup_notifications">Уведомления</string>
+    <string name="setup_background_launch">Запуск помощника из фона</string>
+    <string name="setup_battery">Работа без ограничений батареи</string>
+    <string name="setup_background_access">Фоновая работа приложения</string>
+    <string name="setup_incomplete">Настройка не завершена. Прослушивание включится автоматически, когда будет выдан весь необходимый доступ.</string>
+    <string name="ready_to_start">Настройка завершена. Запускаю фоновое прослушивание…</string>
+
+    <string name="model_preparing">Подготовка встроенной офлайн-модели…</string>
+    <string name="model_preparing_files">Подготовка офлайн-модели: %1$d файлов…</string>
+    <string name="model_prepare_error">Не удалось подготовить встроенную модель: %1$s</string>
+    <string name="start_error">Не удалось запустить фоновое прослушивание</string>
+    <string name="start_requested">Запускаю фоновое прослушивание…</string>
+    <string name="running">Фоновое прослушивание активно</string>
+
+    <string name="test_assistant">Проверить системного помощника</string>
+    <string name="assistant_error">Не удалось открыть выбранного системного помощника</string>
+    <string name="privacy_note">Распознавание выполняется локально на устройстве. Аудио не сохраняется и не отправляется в сеть. Во время постоянного доступа к микрофону Android требует уведомление foreground service.</string>
+
+    <string name="diagnostics_heading">Диагностика</string>
     <string name="diagnostics_show">Показать последние события</string>
     <string name="diagnostics_hide">Скрыть события</string>
     <string name="diagnostics_copy">Скопировать события</string>
     <string name="diagnostics_copied">События скопированы</string>
     <string name="diagnostics_empty">Событий пока нет</string>
+
+    <string name="notification_channel">Голосовая активация</string>
+    <string name="listener_active">Ожидание ключевой фразы</string>
+    <string name="alert_channel">Настройка и ошибки</string>
+    <string name="attention_required">Hotword требует внимания</string>
+    <string name="assistant_launch_failed">Не удалось открыть выбранного помощника. Проверьте необходимые разрешения и настройки.</string>
+    <string name="listener_failed">Прослушивание остановлено после повторных ошибок: %1$s</string>
+    <string name="setup_lost_notification">Изменился необходимый системный доступ. Откройте Hotword и проверьте настройку.</string>
+
+    <string name="boot_channel">Возобновление голосовой активации</string>
+    <string name="boot_title">Откройте Hotword для возобновления</string>
+    <string name="boot_message">После перезагрузки Android требует один раз открыть приложение, прежде чем снова использовать микрофон в фоне.</string>
 </resources>
