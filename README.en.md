@@ -33,7 +33,7 @@ Each item is shown in the app. Returning from system settings triggers an automa
 
 After the trigger phrase is recognized, Hotword can play a short descending “tu-dum” cue before handing the microphone to the assistant. The setting can be disabled from the main screen.
 
-For UX research, open notification-sound collections were reviewed, including [akx/Notifications](https://github.com/akx/Notifications), which is available under CC0 among its license options. **No third-party audio recording is bundled.** The final Hotword cue is synthesized in code from two decaying tones, so the APK has no separate sound-asset license.
+For UX research, open notification-sound collections were reviewed, including [akx/Notifications](https://github.com/akx/Notifications), which is available under CC0 among its license options. **No third-party audio recording is bundled.** The final Hotword cue is synthesized in code from two decaying tones, so it does not require a separate sound-asset license.
 
 ## Icon
 
@@ -81,8 +81,6 @@ MainActivity
 
 `WakeWordEngine` remains replaceable so continuous Vosk ASR can later be replaced by a dedicated low-power keyword spotter.
 
-## Store distribution
+## License
 
-Before publishing, review the target store's current requirements for microphone foreground services and the `SYSTEM_ALERT_WINDOW` special access, and provide an appropriate privacy policy and permission disclosure.
-
-Project source is [MIT](LICENSE). The embedded model and third-party libraries have their own licenses that must also be respected when distributing an APK.
+Project source is distributed under the [MIT License](LICENSE). The embedded Vosk model and third-party libraries are distributed under their respective licenses.
