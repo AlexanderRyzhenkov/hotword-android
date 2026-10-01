@@ -10,7 +10,7 @@ import android.util.Log
 
 /**
  * Invoke only the assistant selected in Android settings. NEVER dispatch a
- * generic implicit intent: on HyperOS it presents a multi-assistant chooser.
+ * generic implicit intent: some Android builds present a multi-assistant chooser.
  * Public APIs cannot exactly impersonate SystemUI's privileged assist gesture.
  */
 object AssistantLauncher {
