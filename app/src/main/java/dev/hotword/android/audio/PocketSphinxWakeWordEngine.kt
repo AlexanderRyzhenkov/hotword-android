@@ -121,6 +121,6 @@ class PocketSphinxWakeWordEngine(
         private const val SEARCH_NAME = "hotword"
         // PocketSphinx 5prealpha defaults to 1e-30. Start slightly more
         // conservative; device testing will determine the final sensitivity.
-        private const val KEYWORD_THRESHOLD = 1e-25
+        private const val KEYWORD_THRESHOLD = 1e-25f
     }
 }
