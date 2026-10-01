@@ -23,6 +23,8 @@ import dev.hotword.android.assistant.AssistantLauncher
 import dev.hotword.android.diagnostics.Diagnostics
 import dev.hotword.android.diagnostics.AppVisibility
 import dev.hotword.android.setup.DeviceSetup
+import dev.hotword.android.setup.SetupRequirements
+import dev.hotword.android.audio.TriggerChime
 import dev.hotword.android.audio.VoskWakeWordEngine
 import dev.hotword.android.audio.WakeWordEngine
 import dev.hotword.android.model.ModelInstaller
@@ -56,6 +58,28 @@ class WakeWordService : Service() {
     }
     private var phrase = "" // main thread, reloaded without destroying the foreground service
     private var assistantWindow = false // main thread
+    private var lastMissingSetup: Set<SetupRequirements.Requirement> = emptySet()
+    private val setupMonitor = object : Runnable {
+        override fun run() {
+            if (!running) return
+            val missing = SetupRequirements.missing(this@WakeWordService)
+            if (missing != lastMissingSetup) {
+                Diagnostics.record(
+                    this@WakeWordService,
+                    if (missing.isEmpty()) "Required Android access restored"
+                    else "Required Android access missing: " + missing.joinToString(",")
+                )
+                if (missing.isNotEmpty()) showSetupWarning()
+                else getSystemService(NotificationManager::class.java).cancel(SETUP_ALERT_ID)
+                lastMissingSetup = missing
+            }
+            if (SetupRequirements.Requirement.MICROPHONE in missing) {
+                stopSelf()
+                return
+            }
+            main.postDelayed(this, SETUP_CHECK_MS)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -100,9 +124,11 @@ class WakeWordService : Service() {
             .apply { setReferenceCounted(false) }
         renewCpuLock.run()
         Diagnostics.record(this, "Foreground microphone service started")
+        lastMissingSetup = emptySet()
+        setupMonitor.run()
         startEngine()
         // A system-managed restart may recover after process eviction, but is not
-        // a bypass for force-stop, boot or OEM microphone/background restrictions.
+        // a bypass for force-stop, reboot, or Android background restrictions.
         return START_STICKY
     }
 
@@ -172,8 +198,17 @@ class WakeWordService : Service() {
         // The Vosk Model stays warm. Only SpeechService/AudioRecord are released.
         worker.execute {
             runCatching { engine?.pause() }
+            if (Preferences.triggerSoundEnabled(this)) {
+                runCatching { TriggerChime.playBlocking() }
+                    .onFailure { Diagnostics.record(this, "Trigger sound failed: " + it.javaClass.simpleName) }
+            }
             main.post {
                 if (!running) return@post
+                val missingSetup = SetupRequirements.missing(this)
+                if (missingSetup.isNotEmpty()) {
+                    Diagnostics.record(this, "Assistant launch with missing setup: " + missingSetup.joinToString(","))
+                    showSetupWarning()
+                }
                 val attempted = AssistantLauncher.launch(this)
                 Diagnostics.record(
                     this,
@@ -245,13 +280,31 @@ class WakeWordService : Service() {
         }
     }
 
+    private fun showSetupWarning() {
+        if (!DeviceSetup.notificationsEnabled(this)) return
+        val openApp = PendingIntent.getActivity(
+            this, 16, Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        getSystemService(NotificationManager::class.java).notify(
+            SETUP_ALERT_ID,
+            Notification.Builder(this, ALERT_CHANNEL)
+                .setSmallIcon(R.drawable.ic_notification_hotword)
+                .setContentTitle(getString(R.string.attention_required))
+                .setContentText(getString(R.string.setup_lost_notification))
+                .setContentIntent(openApp)
+                .setAutoCancel(true)
+                .build()
+        )
+    }
+
     private fun notification(): Notification {
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return Notification.Builder(this, LISTENING_CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(R.drawable.ic_notification_hotword)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(getString(R.string.listener_active))
             .setContentIntent(open)
@@ -268,7 +321,7 @@ class WakeWordService : Service() {
         )
         getSystemService(NotificationManager::class.java).notify(
             ALERT_ID, Notification.Builder(this, ALERT_CHANNEL)
-                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setSmallIcon(R.drawable.ic_notification_hotword)
                 .setContentTitle(getString(R.string.attention_required))
                 .setContentText(message)
                 .setContentIntent(
@@ -286,6 +339,7 @@ class WakeWordService : Service() {
         isActive = false
         suspended = true
         main.removeCallbacksAndMessages(null)
+        getSystemService(NotificationManager::class.java).cancel(SETUP_ALERT_ID)
         runCatching { cpuLock?.takeIf { it.isHeld }?.release() }
         cpuLock = null
         worker.execute {
@@ -305,6 +359,8 @@ class WakeWordService : Service() {
         private const val ALERT_CHANNEL = "hotword_attention"
         private const val NOTIFICATION_ID = 100
         private const val ALERT_ID = 101
+        private const val SETUP_ALERT_ID = 103
+        private const val SETUP_CHECK_MS = 60_000L
         private const val AUDIO_POLL_MS = 350L
         private const val STABLE_RESET_MS = 60_000L
         private const val RECOVERY_DELAY_MS = 5_000L

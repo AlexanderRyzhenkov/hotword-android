@@ -11,38 +11,50 @@ import android.os.Handler
 import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
-import android.view.View
 import dev.hotword.android.assistant.AssistantLauncher
+import dev.hotword.android.audio.TriggerChime
 import dev.hotword.android.audio.TriggerMatcher
-import dev.hotword.android.diagnostics.Diagnostics
 import dev.hotword.android.diagnostics.AppVisibility
+import dev.hotword.android.diagnostics.Diagnostics
 import dev.hotword.android.model.ModelInstaller
 import dev.hotword.android.service.WakeWordService
 import dev.hotword.android.settings.ModelLanguage
 import dev.hotword.android.settings.Preferences
 import dev.hotword.android.setup.DeviceSetup
+import dev.hotword.android.setup.SetupRequirements
+import dev.hotword.android.setup.SetupRequirements.Requirement
 
 /**
- * Settings/status screen. Listening itself has no start/stop toggle: once the model and
- * microphone permission are ready, the foreground service is started automatically.
+ * One screen for phrase/settings plus a strict, universal Android readiness
+ * checklist. Long-running listening has no manual start/stop switch.
  */
 class MainActivity : Activity() {
     private val ui = Handler(Looper.getMainLooper())
     private lateinit var input: EditText
     private lateinit var status: TextView
-    private lateinit var permissionStatus: TextView
-    private lateinit var batteryStatus: TextView
-    private lateinit var autostartStatus: TextView
-    private lateinit var overlayStatus: TextView
+    private lateinit var setupSummary: TextView
     private lateinit var diagnosticsText: TextView
+    private val setupRows = mutableMapOf<Requirement, Pair<TextView, Button>>()
+
+    private var modelReady = false
+    private var preparing = false
+    private var resumed = false
+    private var micRequested = false
+    private var notificationRequested = false
+    private var permissionRequestInFlight = false
+    private var phraseApply: Runnable? = null
     private var diagnosticsExpanded = false
+
     private val refreshDiagnostics = object : Runnable {
         override fun run() {
             if (!resumed || !diagnosticsExpanded) return
@@ -51,26 +63,34 @@ class MainActivity : Activity() {
             ui.postDelayed(this, 2_000L)
         }
     }
-    private var modelReady = false
-    private var preparing = false
-    private var resumed = false
-    private var micRequested = false
-    private var notificationRequested = false
-    private var permissionRequestInFlight = false
-    private var phraseApply: Runnable? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val gap = (16 * resources.displayMetrics.density).toInt()
+
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(gap, gap, gap, gap)
         }
+
+        column.addView(ImageView(this).apply {
+            setImageResource(R.mipmap.ic_launcher)
+            adjustViewBounds = true
+            layoutParams = LinearLayout.LayoutParams(
+                (72 * resources.displayMetrics.density).toInt(),
+                (72 * resources.displayMetrics.density).toInt()
+            )
+        })
         column.addView(TextView(this).apply {
             text = getString(R.string.app_name)
             textSize = 25f
-            setPadding(0, 0, 0, gap)
+            setPadding(0, gap / 2, 0, 0)
         })
+        column.addView(TextView(this).apply {
+            text = getString(R.string.app_tagline)
+            setPadding(0, gap / 3, 0, gap)
+        })
+
         column.addView(TextView(this).apply { text = getString(R.string.phrase_label) })
         input = EditText(this).apply {
             setSingleLine(true)
@@ -78,45 +98,59 @@ class MainActivity : Activity() {
             hint = getString(R.string.phrase_hint)
         }
         column.addView(input)
-        column.addView(TextView(this).apply { text = getString(R.string.phrase_apply_hint) })
-        column.addView(TextView(this).apply { text = getString(R.string.language_russian_only) })
+        column.addView(TextView(this).apply {
+            text = getString(R.string.phrase_apply_hint)
+        })
 
-        status = TextView(this).apply { setPadding(0, gap, 0, gap) }
+        column.addView(Switch(this).apply {
+            text = getString(R.string.trigger_sound)
+            isChecked = Preferences.triggerSoundEnabled(this@MainActivity)
+            setPadding(0, gap / 2, 0, gap / 2)
+            setOnCheckedChangeListener { _, enabled ->
+                Preferences.setTriggerSoundEnabled(this@MainActivity, enabled)
+                if (enabled) {
+                    Thread({
+                        runCatching { TriggerChime.playBlocking() }
+                    }, "TriggerChimePreview").start()
+                }
+            }
+        })
+
+        status = TextView(this).apply { setPadding(0, gap / 2, 0, gap) }
         column.addView(status)
 
         column.addView(TextView(this).apply {
             text = getString(R.string.setup_heading)
             textSize = 20f
         })
-        permissionStatus = TextView(this)
-        column.addView(permissionStatus)
-        column.addView(Button(this).apply {
-            text = getString(R.string.app_settings)
-            setOnClickListener { DeviceSetup.openAppSettings(this@MainActivity) }
-        })
+        setupSummary = TextView(this).apply { setPadding(0, gap / 3, 0, gap / 2) }
+        column.addView(setupSummary)
 
-        batteryStatus = TextView(this).apply { setPadding(0, gap / 2, 0, 0) }
-        column.addView(batteryStatus)
-        column.addView(Button(this).apply {
-            text = getString(R.string.battery_settings)
-            setOnClickListener { DeviceSetup.openBatterySettings(this@MainActivity) }
-        })
-
-        autostartStatus = TextView(this).apply { setPadding(0, gap / 2, 0, 0) }
-        column.addView(autostartStatus)
-        column.addView(Button(this).apply {
-            text = getString(R.string.autostart_settings)
-            setOnClickListener { DeviceSetup.openAutostartSettings(this@MainActivity) }
-        })
-
-        overlayStatus = TextView(this).apply {
-            setPadding(0, gap / 2, 0, 0)
+        addSetupRow(column, Requirement.MICROPHONE, R.string.setup_microphone) {
+            if (Build.VERSION.SDK_INT >= 23) {
+                micRequested = true
+                permissionRequestInFlight = true
+                requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC)
+            }
         }
-        column.addView(overlayStatus)
-        column.addView(Button(this).apply {
-            text = getString(R.string.overlay_settings)
-            setOnClickListener { DeviceSetup.openOverlaySettings(this@MainActivity) }
-        })
+        addSetupRow(column, Requirement.NOTIFICATIONS, R.string.setup_notifications) {
+            if (Build.VERSION.SDK_INT >= 33) {
+                notificationRequested = true
+                permissionRequestInFlight = true
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+            } else {
+                DeviceSetup.openNotificationSettings(this)
+            }
+        }
+        addSetupRow(column, Requirement.BACKGROUND_LAUNCH, R.string.setup_background_launch) {
+            DeviceSetup.openOverlaySettings(this)
+        }
+        addSetupRow(column, Requirement.BATTERY_UNRESTRICTED, R.string.setup_battery) {
+            DeviceSetup.openBatterySettings(this)
+        }
+        addSetupRow(column, Requirement.BACKGROUND_NOT_RESTRICTED, R.string.setup_background_access) {
+            DeviceSetup.openBackgroundSettings(this)
+        }
 
         column.addView(Button(this).apply {
             text = getString(R.string.test_assistant)
@@ -126,19 +160,22 @@ class MainActivity : Activity() {
                 }
             }
         })
+
         column.addView(TextView(this).apply {
-            text = getString(R.string.usage_warning)
-            setPadding(0, gap, 0, 0)
+            text = getString(R.string.privacy_note)
+            setPadding(0, gap, 0, gap / 2)
         })
 
         column.addView(TextView(this).apply {
             text = getString(R.string.diagnostics_heading)
-            textSize = 19f
+            textSize = 18f
             setPadding(0, gap, 0, 0)
         })
         diagnosticsText = TextView(this).apply { visibility = View.GONE }
         column.addView(diagnosticsText)
-        val diagnosticsButton = Button(this).apply { text = getString(R.string.diagnostics_show) }
+        val diagnosticsButton = Button(this).apply {
+            text = getString(R.string.diagnostics_show)
+        }
         diagnosticsButton.setOnClickListener {
             diagnosticsExpanded = !diagnosticsExpanded
             diagnosticsText.visibility = if (diagnosticsExpanded) View.VISIBLE else View.GONE
@@ -155,7 +192,11 @@ class MainActivity : Activity() {
                 val text = Diagnostics.recent(this@MainActivity)
                 (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
                     .setPrimaryClip(ClipData.newPlainText("Hotword diagnostics", text))
-                Toast.makeText(this@MainActivity, R.string.diagnostics_copied, Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@MainActivity,
+                    R.string.diagnostics_copied,
+                    Toast.LENGTH_SHORT
+                ).show()
             }
         })
 
@@ -174,7 +215,9 @@ class MainActivity : Activity() {
                 view.setPadding(safe.left, safe.top, safe.right, safe.bottom)
                 insets
             }
-        } else scroll.fitsSystemWindows = true
+        } else {
+            scroll.fitsSystemWindows = true
+        }
         setContentView(scroll)
 
         input.addTextChangedListener(object : TextWatcher {
@@ -184,23 +227,43 @@ class MainActivity : Activity() {
                 phraseApply?.let(ui::removeCallbacks)
                 val next = s?.toString()?.trim().orEmpty()
                 if (next == Preferences.phrase(this@MainActivity)) return
-                phraseApply = Runnable { applyPhrase(next) }.also { ui.postDelayed(it, 1_500) }
+                phraseApply = Runnable { applyPhrase(next) }.also {
+                    ui.postDelayed(it, 1_500L)
+                }
             }
         })
+
         prepareModel()
+    }
+
+    private fun addSetupRow(
+        parent: LinearLayout,
+        requirement: Requirement,
+        labelRes: Int,
+        action: () -> Unit
+    ) {
+        val label = TextView(this).apply { setPadding(0, 6, 0, 0) }
+        val button = Button(this).apply {
+            text = getString(R.string.setup_fix)
+            setOnClickListener { action() }
+        }
+        parent.addView(label)
+        parent.addView(button)
+        setupRows[requirement] = label to button
+        label.tag = labelRes
     }
 
     override fun onResume() {
         super.onResume()
         resumed = true
         AppVisibility.isActivityResumed = true
-        updateChecks()
+        updateSetup()
+        requestRuntimePermissionsOnce()
         if (modelReady) ensureListening()
         if (diagnosticsExpanded) refreshDiagnostics.run()
     }
 
     override fun onPause() {
-        // Persist/reload any pending edit BEFORE losing our visible Activity.
         phraseApply?.let(ui::removeCallbacks)
         phraseApply = null
         if (::input.isInitialized) applyPhrase(input.text.toString().trim())
@@ -210,23 +273,46 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
+    private fun requestRuntimePermissionsOnce() {
+        if (permissionRequestInFlight) return
+        if (!DeviceSetup.microphoneGranted(this) && !micRequested) {
+            micRequested = true
+            permissionRequestInFlight = true
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC)
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            !DeviceSetup.notificationsGranted(this) &&
+            !notificationRequested
+        ) {
+            notificationRequested = true
+            permissionRequestInFlight = true
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+        }
+    }
+
     private fun prepareModel() {
         if (preparing) return
         if (ModelInstaller.isInstalled(this, ModelLanguage.RUSSIAN)) {
             modelReady = true
-            status.text = getString(R.string.active_preparing)
+            updateSetup()
             ensureListening()
             return
         }
+
         preparing = true
         status.text = getString(R.string.model_preparing)
         Thread({
             val result = runCatching {
                 ModelInstaller.ensureInstalled(applicationContext, ModelLanguage.RUSSIAN) { files ->
                     ui.post {
-                        if (!isDestroyed) status.text =
-                            if (files > 0) getString(R.string.model_preparing_files, files)
-                            else getString(R.string.model_preparing)
+                        if (!isDestroyed) {
+                            status.text = if (files > 0) {
+                                getString(R.string.model_preparing_files, files)
+                            } else {
+                                getString(R.string.model_preparing)
+                            }
+                        }
                     }
                 }
             }
@@ -235,6 +321,8 @@ class MainActivity : Activity() {
                 preparing = false
                 if (result.isSuccess) {
                     modelReady = true
+                    updateSetup()
+                    requestRuntimePermissionsOnce()
                     ensureListening()
                 } else {
                     status.text = getString(
@@ -253,69 +341,73 @@ class MainActivity : Activity() {
             status.text = getString(R.string.phrase_invalid)
             return
         }
+
         Preferences.save(this, phrase)
         if (!modelReady || !DeviceSetup.microphoneGranted(this)) return
-        status.text = getString(R.string.restarting)
-        // The old stop/delayed-start sequence could leave recognition OFF when
-        // the user switched apps in that window. Reload inside the live FGS.
+
         try {
-            if (WakeWordService.isActive) WakeWordService.reload(this)
-            else if (resumed) ensureListening()
-        } catch (error: Exception) {
+            if (WakeWordService.isActive) {
+                WakeWordService.reload(this)
+            } else if (resumed) {
+                ensureListening()
+            }
+        } catch (_: Exception) {
             status.text = getString(R.string.start_error)
         }
     }
 
     private fun ensureListening() {
-        if (!modelReady || !resumed || permissionRequestInFlight || isDestroyed || isFinishing) return
-        if (!DeviceSetup.microphoneGranted(this)) {
-            status.text = getString(R.string.mic_required)
-            if (!micRequested) {
-                micRequested = true
-                permissionRequestInFlight = true
-                requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), REQUEST_MIC)
-            }
+        if (!modelReady || !resumed || permissionRequestInFlight || isDestroyed || isFinishing) {
             return
         }
-        if (Build.VERSION.SDK_INT >= 33 &&
-            !DeviceSetup.notificationsGranted(this) && !notificationRequested) {
-            notificationRequested = true
-            permissionRequestInFlight = true
-            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
-            return // Keep this activity visible until the permission dialog is dismissed.
+
+        val missing = SetupRequirements.missing(this)
+        if (missing.isNotEmpty()) {
+            status.text = getString(R.string.setup_incomplete)
+            updateSetup()
+            return
         }
+
         if (!WakeWordService.isActive) {
             try {
                 WakeWordService.start(this)
                 status.text = getString(R.string.start_requested)
-            } catch (error: Exception) {
+            } catch (_: Exception) {
                 status.text = getString(R.string.start_error)
             }
         } else {
             status.text = getString(R.string.running)
         }
-        updateChecks()
+        updateSetup()
     }
 
-    private fun updateChecks() {
-        if (!::permissionStatus.isInitialized) return
-        permissionStatus.text = getString(
-            R.string.permission_check,
-            if (DeviceSetup.microphoneGranted(this)) "✓" else "✕",
-            if (DeviceSetup.notificationsEnabled(this)) "✓" else "✕"
+    private fun updateSetup() {
+        if (!::setupSummary.isInitialized) return
+        val missing = SetupRequirements.missing(this)
+        setupSummary.text = getString(
+            if (missing.isEmpty()) R.string.setup_ready else R.string.setup_needs_attention
         )
-        batteryStatus.text = getString(
-            R.string.battery_check,
-            if (DeviceSetup.batteryExempt(this)) getString(R.string.battery_exempt)
-            else getString(R.string.battery_restricted),
-            if (DeviceSetup.backgroundRestricted(this)) getString(R.string.background_restricted)
-            else getString(R.string.background_not_restricted)
-        )
-        autostartStatus.text = getString(R.string.autostart_unverifiable)
-        overlayStatus.text = getString(
-            if (DeviceSetup.overlayAllowed(this)) R.string.overlay_granted
-            else R.string.overlay_missing
-        )
+
+        for ((requirement, row) in setupRows) {
+            val (label, button) = row
+            val nameRes = label.tag as Int
+            val ok = requirement !in missing
+            label.text = getString(
+                if (ok) R.string.setup_item_ready else R.string.setup_item_missing,
+                getString(nameRes)
+            )
+            button.visibility = if (ok) View.GONE else View.VISIBLE
+        }
+
+        if (modelReady && missing.isEmpty()) {
+            status.text = if (WakeWordService.isActive) {
+                getString(R.string.running)
+            } else {
+                getString(R.string.ready_to_start)
+            }
+        } else if (modelReady) {
+            status.text = getString(R.string.setup_incomplete)
+        }
     }
 
     override fun onRequestPermissionsResult(
@@ -325,14 +417,15 @@ class MainActivity : Activity() {
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         permissionRequestInFlight = false
-        updateChecks()
-        if ((requestCode == REQUEST_MIC || requestCode == REQUEST_NOTIFICATIONS) &&
-            modelReady) ensureListening()
+        updateSetup()
+        requestRuntimePermissionsOnce()
+        if (modelReady) ensureListening()
     }
 
     override fun onDestroy() {
         AppVisibility.isActivityResumed = false
         phraseApply?.let(ui::removeCallbacks)
+        ui.removeCallbacks(refreshDiagnostics)
         super.onDestroy()
     }
 

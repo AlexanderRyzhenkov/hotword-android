@@ -11,58 +11,83 @@ import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 
-/** Public Android signals only. HyperOS-specific autostart is not queryable. */
+/** Public Android settings and signals only; no OEM-specific package names. */
 object DeviceSetup {
-    fun microphoneGranted(context: Context) =
+    fun microphoneGranted(context: Context): Boolean =
         context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
-    fun notificationsGranted(context: Context) =
+    fun notificationsGranted(context: Context): Boolean =
         Build.VERSION.SDK_INT < 33 ||
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
-    fun notificationsEnabled(context: Context) =
+    fun notificationsEnabled(context: Context): Boolean =
         notificationsGranted(context) &&
             context.getSystemService(NotificationManager::class.java).areNotificationsEnabled()
 
-    fun batteryExempt(context: Context) =
+    /** Special access explicitly granted by the user in Android Settings. */
+    fun overlayAllowed(context: Context): Boolean = Settings.canDrawOverlays(context)
+
+    fun batteryExempt(context: Context): Boolean =
         context.getSystemService(PowerManager::class.java)
             .isIgnoringBatteryOptimizations(context.packageName)
 
-    /** Special permission, always opt-in; cannot be granted by the app. */
-    fun overlayAllowed(context: Context): Boolean = Settings.canDrawOverlays(context)
-
-    fun openOverlaySettings(context: Context) = openFirst(context, listOf(
-        Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-            Uri.parse("package:" + context.packageName)), appDetails(context)
-    ))
-
-    fun backgroundRestricted(context: Context) =
+    fun backgroundRestricted(context: Context): Boolean =
         Build.VERSION.SDK_INT >= 28 &&
             context.getSystemService(ActivityManager::class.java).isBackgroundRestricted
 
     fun appDetails(context: Context): Intent =
-        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
-            Uri.fromParts("package", context.packageName, null))
+        Intent(
+            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            Uri.fromParts("package", context.packageName, null)
+        )
 
     fun openAppSettings(context: Context) = openFirst(context, listOf(appDetails(context)))
 
-    fun openBatterySettings(context: Context) = openFirst(context, listOf(
-        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), appDetails(context)
-    ))
+    fun openNotificationSettings(context: Context) = openFirst(
+        context,
+        listOf(
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                .putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName),
+            appDetails(context)
+        )
+    )
 
-    fun openAutostartSettings(context: Context) = openFirst(context, listOf(
-        // Proprietary Xiaomi/HyperOS page; fallback to app details on other devices.
-        Intent().setClassName("com.miui.securitycenter",
-            "com.miui.permcenter.autostart.AutoStartManagementActivity"),
-        appDetails(context)
-    ))
+    fun openOverlaySettings(context: Context) = openFirst(
+        context,
+        listOf(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + context.packageName)
+            ),
+            appDetails(context)
+        )
+    )
+
+    fun openBatterySettings(context: Context) = openFirst(
+        context,
+        listOf(
+            Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+            Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS),
+            appDetails(context)
+        )
+    )
+
+    fun openBackgroundSettings(context: Context) = openFirst(
+        context,
+        listOf(
+            appDetails(context),
+            Intent(Settings.ACTION_SETTINGS)
+        )
+    )
 
     private fun openFirst(context: Context, intents: List<Intent>) {
         for (intent in intents) {
             try {
                 context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                 return
-            } catch (_: Exception) { /* Unsupported OEM settings activity. */ }
+            } catch (_: Exception) {
+                // Not all settings pages exist on every Android build.
+            }
         }
     }
 }
