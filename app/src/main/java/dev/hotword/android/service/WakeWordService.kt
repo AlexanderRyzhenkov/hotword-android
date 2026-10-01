@@ -25,7 +25,7 @@ import dev.hotword.android.diagnostics.AppVisibility
 import dev.hotword.android.setup.DeviceSetup
 import dev.hotword.android.setup.SetupRequirements
 import dev.hotword.android.audio.TriggerChime
-import dev.hotword.android.audio.VoskWakeWordEngine
+import dev.hotword.android.audio.PocketSphinxWakeWordEngine
 import dev.hotword.android.audio.WakeWordEngine
 import dev.hotword.android.model.ModelInstaller
 import dev.hotword.android.settings.ModelLanguage
@@ -123,7 +123,7 @@ class WakeWordService : Service() {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, packageName + ":HotwordListening")
             .apply { setReferenceCounted(false) }
         renewCpuLock.run()
-        Diagnostics.record(this, "Foreground microphone service started")
+        Diagnostics.record(this, "Foreground microphone service started (PocketSphinx KWS)")
         lastMissingSetup = emptySet()
         setupMonitor.run()
         startEngine()
@@ -160,8 +160,10 @@ class WakeWordService : Service() {
                     existing.updatePhrase(phrase)
                     existing.resume()
                 } else {
-                    val next = VoskWakeWordEngine(
-                        ModelInstaller.destination(this, ModelLanguage.RUSSIAN), phrase
+                    val next = PocketSphinxWakeWordEngine(
+                        acousticModel = ModelInstaller.destination(this, ModelLanguage.RUSSIAN),
+                        workingDirectory = ModelInstaller.workDirectory(this),
+                        phrase = phrase
                     )
                     engine = next
                     next.start(
@@ -195,7 +197,7 @@ class WakeWordService : Service() {
             "Trigger detected: appVisible=${AppVisibility.isActivityResumed}, " +
                 "screenOn=$screenOn, locked=$locked, overlayGranted=$overlayAllowed"
         )
-        // The Vosk Model stays warm. Only SpeechService/AudioRecord are released.
+        // PocketSphinx decoder/model stays warm. Only AudioRecord is released.
         worker.execute {
             runCatching { engine?.pause() }
             if (Preferences.triggerSoundEnabled(this)) {
