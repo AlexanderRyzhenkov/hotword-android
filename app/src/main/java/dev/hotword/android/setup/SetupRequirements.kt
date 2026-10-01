@@ -1,7 +1,6 @@
 package dev.hotword.android.setup
 
 import android.content.Context
-import android.os.Build
 
 /**
  * All capabilities required for reliable always-listening behavior.
@@ -20,9 +19,7 @@ object SetupRequirements {
 
     fun missing(context: Context): Set<Requirement> = buildSet {
         if (!DeviceSetup.microphoneGranted(context)) add(Requirement.MICROPHONE)
-        if (Build.VERSION.SDK_INT >= 33 && !DeviceSetup.notificationsGranted(context)) {
-            add(Requirement.NOTIFICATIONS)
-        }
+        if (!DeviceSetup.notificationsEnabled(context)) add(Requirement.NOTIFICATIONS)
         if (!DeviceSetup.overlayAllowed(context)) add(Requirement.BACKGROUND_LAUNCH)
         if (!DeviceSetup.batteryExempt(context)) add(Requirement.BATTERY_UNRESTRICTED)
         if (DeviceSetup.backgroundRestricted(context)) add(Requirement.BACKGROUND_NOT_RESTRICTED)
