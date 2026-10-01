@@ -13,6 +13,8 @@ class RussianPronunciationTest {
 
     @Test fun rejectsPhraseWithoutRussianWords() {
         assertFalse(RussianPronunciation.isSupported("hey assistant"))
+        assertFalse(RussianPronunciation.isSupported("привет assistant"))
+        assertFalse(RussianPronunciation.isSupported("привет 2"))
         assertFalse(RussianPronunciation.isSupported("!!!"))
         assertTrue(RussianPronunciation.isSupported("слушай меня"))
     }
