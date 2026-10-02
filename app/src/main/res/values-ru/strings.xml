@@ -5,7 +5,7 @@
 
     <string name="phrase_label">Ключевая фраза</string>
     <string name="phrase_hint">Например: привет помощник</string>
-    <string name="phrase_apply_hint">Изменения применяются автоматически после небольшой паузы.</string>
+    <string name="phrase_apply_hint">Изменения применяются автоматически после небольшой паузы. Фраза из 2–4 слов обычно даёт меньше ложных срабатываний, чем одно короткое слово.</string>
     <string name="phrase_invalid">Введите русскую фразу длиной до 100 символов</string>
 
     <string name="trigger_sound">Звуковой сигнал после распознавания фразы</string>
