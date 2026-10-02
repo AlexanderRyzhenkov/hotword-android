@@ -41,7 +41,7 @@ assets_ready=true
 for name in "${acoustic[@]}"; do
   [[ -s "$assets/$name" ]] || assets_ready=false
 done
-[[ -s "$assets/ru.lexicon.gz" ]] || assets_ready=false
+[[ -s "$assets/ru.lexicon" ]] || assets_ready=false
 if [[ "$assets_ready" == true ]] && [[ -f "$assets/.source-sha256" ]] && \
    [[ "$(tr -d '[:space:]' < "$assets/.source-sha256")" == "$MODEL_SHA256" ]]; then
   echo "Pinned Russian PocketSphinx acoustic model and lexicon already prepared."
@@ -94,7 +94,7 @@ done
 # Keep the official 545k-word pronunciation lexicon compressed in the APK.
 # At runtime Hotword streams it only when a phrase changes, then creates a
 # tiny phrase-only PocketSphinx dictionary. It is never loaded wholesale.
-gzip -n -9 -c "$dictionary" > "$assets/ru.lexicon.gz"
+gzip -n -9 -c "$dictionary" > "$assets/ru.lexicon"
 printf '%s\n' "$MODEL_SHA256" > "$assets/.source-sha256"
 
 echo "PocketSphinx resources prepared:"
