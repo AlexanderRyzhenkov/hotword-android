@@ -89,7 +89,7 @@ class PocketSphinxWakeWordEngine(
 
         val dictionary = RussianPronunciation.buildDictionary(
             phrase,
-            File(acousticModel, "ru.lexicon.gz")
+            File(acousticModel, "ru.lexicon")
         )
         keyphrase = dictionary.keyphrase
         val dictionaryFile = File(workingDirectory, "keyphrase.dict")
