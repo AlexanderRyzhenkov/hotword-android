@@ -19,7 +19,7 @@ object ModelInstaller {
         "noisedict",
         "transition_matrices",
         "variances",
-        "ru.lexicon.gz"
+        "ru.lexicon"
     )
 
     fun destination(context: Context, language: ModelLanguage): File =
