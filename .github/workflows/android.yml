@@ -52,6 +52,7 @@ jobs:
               'assets/pocketsphinx/ru/noisedict',
               'assets/pocketsphinx/ru/transition_matrices',
               'assets/pocketsphinx/ru/variances',
+              'assets/pocketsphinx/ru/ru.lexicon.gz',
           }
           with zipfile.ZipFile(apk) as archive:
               names = set(archive.namelist())
