@@ -36,7 +36,7 @@ val verifyPocketSphinxInputs by tasks.registering {
         val required = listOf(
             "feat.params", "feature_transform", "mdef", "means",
             "mixture_weights", "noisedict", "transition_matrices", "variances",
-            "ru.lexicon.gz"
+            "ru.lexicon"
         )
         check(required.all { file -> assetDir.resolve(file).isFile && assetDir.resolve(file).length() > 0L }) {
             "Missing PocketSphinx Russian acoustic files; run bash scripts/prepare-pocketsphinx.sh"
