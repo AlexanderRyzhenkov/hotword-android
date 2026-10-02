@@ -1,5 +1,6 @@
 package dev.hotword.android.audio
 
+import android.util.Log
 import edu.cmu.pocketsphinx.Hypothesis
 import edu.cmu.pocketsphinx.RecognitionListener
 import edu.cmu.pocketsphinx.SpeechRecognizer
@@ -86,16 +87,27 @@ class PocketSphinxWakeWordEngine(
             error("Cannot create PocketSphinx working directory")
         }
 
-        val dictionary = RussianPronunciation.buildDictionary(phrase)
+        val dictionary = RussianPronunciation.buildDictionary(
+            phrase,
+            File(acousticModel, "ru.lexicon")
+        )
         keyphrase = dictionary.keyphrase
         val dictionaryFile = File(workingDirectory, "keyphrase.dict")
         dictionaryFile.writeText(dictionary.lines.joinToString("\n", postfix = "\n"))
+
+        val threshold = keywordThreshold(dictionary)
+        Log.i(
+            TAG,
+            "KWS phrase words=${dictionary.wordCount}, syllables=${dictionary.syllableCount}, " +
+                "official=${dictionary.officialWordCount}, fallback=${dictionary.fallbackWordCount}, " +
+                "threshold=$threshold"
+        )
 
         val setup = SpeechRecognizerSetup.defaultSetup()
             .setAcousticModel(acousticModel)
             .setDictionary(dictionaryFile)
             .setSampleRate(16_000)
-            .setKeywordThreshold(KEYWORD_THRESHOLD)
+            .setKeywordThreshold(threshold)
             .setString("-fdict", File(acousticModel, "noisedict").absolutePath)
             .setString("-lda", File(acousticModel, "feature_transform").absolutePath)
             .setBoolean("-backtrace", false)
@@ -118,9 +130,22 @@ class PocketSphinxWakeWordEngine(
     }
 
     companion object {
+        private const val TAG = "HotwordPocketSphinx"
         private const val SEARCH_NAME = "hotword"
-        // PocketSphinx 5prealpha defaults to 1e-30. Start slightly more
-        // conservative; device testing will determine the final sensitivity.
-        private const val KEYWORD_THRESHOLD = 1e-25f
+
+        /**
+         * PocketSphinx thresholds are phrase-specific: larger values are stricter.
+         * Short one-word wake phrases need much stronger false-positive filtering,
+         * while longer phrases can safely use a more permissive threshold.
+         */
+        internal fun keywordThreshold(spec: RussianPronunciation.DictionarySpec): Float =
+            when {
+                spec.wordCount == 1 && spec.syllableCount <= 2 -> 1e-10f
+                spec.wordCount == 1 && spec.syllableCount == 3 -> 1e-15f
+                spec.wordCount == 1 -> 1e-20f
+                spec.wordCount == 2 && spec.syllableCount <= 4 -> 1e-25f
+                spec.wordCount >= 3 -> 1e-35f
+                else -> 1e-30f
+            }
     }
 }

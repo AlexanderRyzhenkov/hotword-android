@@ -8,7 +8,7 @@ import java.io.IOException
 /** Copies the APK-bundled PocketSphinx acoustic model into private files. */
 object ModelInstaller {
     private const val BUFFER_SIZE = 32 * 1024
-    private const val MAX_UNPACKED_BYTES = 128L * 1024L * 1024L
+    private const val MAX_UNPACKED_BYTES = 192L * 1024L * 1024L
 
     private val requiredFiles = listOf(
         "feat.params",
@@ -18,7 +18,8 @@ object ModelInstaller {
         "mixture_weights",
         "noisedict",
         "transition_matrices",
-        "variances"
+        "variances",
+        "ru.lexicon"
     )
 
     fun destination(context: Context, language: ModelLanguage): File =

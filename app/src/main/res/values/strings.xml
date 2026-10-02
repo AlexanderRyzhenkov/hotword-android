@@ -5,7 +5,7 @@
 
     <string name="phrase_label">Trigger phrase</string>
     <string name="phrase_hint">For example: привет помощник</string>
-    <string name="phrase_apply_hint">Changes are applied automatically after a short pause.</string>
+    <string name="phrase_apply_hint">Changes are applied automatically after a short pause. A 2–4 word phrase usually gives fewer false activations than a single short word.</string>
     <string name="phrase_invalid">Enter a Russian phrase up to 100 characters</string>
 
     <string name="trigger_sound">Play a confirmation sound when the phrase is recognized</string>

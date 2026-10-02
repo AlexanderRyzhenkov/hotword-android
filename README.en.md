@@ -4,7 +4,7 @@
 
 Hotword is an open-source Android app that locally recognizes a user-configurable Russian trigger phrase and invokes **the digital assistant selected as Android's default**. It is not tied to a specific assistant provider.
 
-## Version 0.5.0 — PocketSphinx KWS
+## Version 0.5.1 — PocketSphinx KWS tuning
 
 Hotword no longer runs full Vosk speech transcription while idle. It now uses **PocketSphinx keyword spotting**, decoding only one configured trigger phrase. The purpose of this release is to substantially reduce continuous CPU and battery use.
 
@@ -14,14 +14,16 @@ The Russian CMUSphinx acoustic model is packaged into the APK at build time. The
 
 Changing the phrase still does not require model retraining.
 
-Hotword normalizes Cyrillic input and builds a tiny PocketSphinx pronunciation dictionary on-device for the words in the current phrase. Because the Russian acoustic model distinguishes stressed and unstressed vowels while users should not need to mark stress manually, Hotword creates alternate pronunciations for every possible vowel stress position. The letter `ё` is treated as stressed.
+Hotword normalizes Cyrillic input and builds a tiny PocketSphinx pronunciation dictionary on-device for the current phrase. Starting with 0.5.1, known words use pronunciations from the official `ru.dic` shipped in the `cmusphinx-ru-5.2` package. The full lexicon stays compressed in the APK and is streamed only when recognition starts or the phrase changes; PocketSphinx itself receives only the entries required by the current phrase.
+
+Words missing from the official lexicon still use the lightweight fallback G2P with alternate stress positions. This preserves arbitrary Russian phrases without model retraining while avoiding unnecessary stress variants for common words.
 
 ```text
 "привет помощник"
         ↓
-runtime G2P
+official ru.dic → exact pronunciations
         ↓
-alternate word pronunciations
+fallback G2P for unknown words only
         ↓
 PocketSphinx single-keyphrase search
 ```
@@ -40,7 +42,7 @@ In 0.5.0 the trigger phrase must contain Russian words. Punctuation and hyphens 
 
 ## Battery experiment
 
-The previous continuous-Vosk build showed high background usage on a real device: roughly 22% of the system battery-usage share during the observed period, 1 h 38 min CPU time, and almost 8 hours of active time. PocketSphinx 0.5.0 is intended as the direct comparison build.
+The previous continuous-Vosk build showed high background usage on a real device: roughly 22% of the system battery-usage share during the observed period, 1 h 38 min CPU time, and almost 8 hours of active time. PocketSphinx 0.5.x is the direct comparison line for battery measurements.
 
 For a useful comparison, record battery share, CPU time, active time, missed triggers, and false activations over a similar several-hour idle period.
 
@@ -52,7 +54,9 @@ Audio is processed locally and is not stored or uploaded. The app does not reque
 
 ## Limitations
 
-PocketSphinx uses a classic HMM/GMM recognizer. Its narrow keyword search should be much cheaper than full ASR, but noise robustness and phrase-specific accuracy require real-device testing. The initial KWS threshold is intentionally conservative and can be tuned after false-positive/miss-rate measurements.
+PocketSphinx uses a classic HMM/GMM recognizer. Keyword accuracy remains phrase-dependent. Version 0.5.1 chooses the KWS threshold from phrase length: short one-word phrases use a stricter threshold to suppress false activations, while multiword phrases use a more sensitive threshold. This follows CMUSphinx guidance that keyword thresholds should be tuned per keyword.
+
+Wake phrases of 2–4 words are preferred. Very short single-word phrases such as “Алиса” remain inherently more prone to false activations even with a stricter threshold.
 
 After a full reboot, Android 14+ requires Hotword to be opened once before continuous microphone foreground-service listening can resume.
 

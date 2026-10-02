@@ -1,5 +1,7 @@
 package dev.hotword.android.audio
 
+import java.io.File
+import java.util.zip.GZIPOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -19,13 +21,37 @@ class RussianPronunciationTest {
         assertTrue(RussianPronunciation.isSupported("слушай меня"))
     }
 
-    @Test fun createsStressAlternativesWithoutRetrainingModel() {
+    @Test fun createsStressAlternativesForUnknownWordsWithoutRetrainingModel() {
         val spec = RussianPronunciation.buildDictionary("привет помощник")
         assertEquals("привет помощник", spec.keyphrase)
         assertTrue(spec.lines.any { it.startsWith("привет ") })
         assertTrue(spec.lines.any { it.startsWith("привет(2) ") })
         assertTrue(spec.lines.any { it.startsWith("помощник ") })
         assertTrue(spec.lines.count { it.startsWith("помощник") } >= 3)
+        assertEquals(0, spec.officialWordCount)
+        assertEquals(2, spec.fallbackWordCount)
+    }
+
+    @Test fun officialLexiconReplacesBroadStressFallback() {
+        val lexicon = File.createTempFile("ru-lexicon", ".gz")
+        try {
+            GZIPOutputStream(lexicon.outputStream()).bufferedWriter(Charsets.UTF_8).use { writer ->
+                writer.appendLine("алиса a0 lj i1 s a0")
+                writer.appendLine("алиса(2) a0 l i1 s a0")
+                writer.appendLine("слушай s l u1 sh a0 j")
+            }
+
+            val spec = RussianPronunciation.buildDictionary("слушай алиса", lexicon)
+            assertEquals(2, spec.officialWordCount)
+            assertEquals(0, spec.fallbackWordCount)
+            assertEquals(2, spec.wordCount)
+            assertEquals(5, spec.syllableCount)
+            assertTrue(spec.lines.contains("слушай s l u1 sh a0 j"))
+            assertTrue(spec.lines.contains("алиса a0 lj i1 s a0"))
+            assertTrue(spec.lines.contains("алиса(2) a0 l i1 s a0"))
+        } finally {
+            lexicon.delete()
+        }
     }
 
     @Test fun yoIsAlwaysStressed() {

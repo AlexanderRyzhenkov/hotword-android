@@ -1,17 +1,26 @@
 package dev.hotword.android.audio
 
+import java.io.File
 import java.util.Locale
+import java.util.zip.GZIPInputStream
 
 /**
- * Small Russian grapheme-to-phoneme helper for the CMUSphinx Russian model.
+ * Russian pronunciation preparation for the CMUSphinx acoustic model.
  *
- * The acoustic model distinguishes stressed/unstressed vowels, while the UI
- * deliberately does not require stress marks. To preserve arbitrary phrases,
- * each word gets alternate dictionary pronunciations with every possible vowel
- * stress position (ё stays stressed). PocketSphinx then chooses acoustically.
+ * Prefer the official cmusphinx-ru-5.2 ru.dic pronunciation whenever the word
+ * is present. Only unknown words fall back to the lightweight heuristic G2P.
+ * This avoids broad, incorrect stress alternatives for common wake words while
+ * preserving the ability to enter arbitrary Russian phrases without retraining.
  */
 object RussianPronunciation {
-    data class DictionarySpec(val keyphrase: String, val lines: List<String>)
+    data class DictionarySpec(
+        val keyphrase: String,
+        val lines: List<String>,
+        val officialWordCount: Int,
+        val fallbackWordCount: Int,
+        val wordCount: Int,
+        val syllableCount: Int
+    )
 
     private val vowelBase = mapOf(
         'а' to "a", 'я' to "a",
@@ -43,8 +52,6 @@ object RussianPronunciation {
         .replace(Regex("\\s+"), " ")
 
     fun isSupported(raw: String): Boolean {
-        // Punctuation is fine, but silently dropping Latin letters/digits would
-        // make the configured wake phrase differ from what the user entered.
         if (raw.any { it.isDigit() }) return false
         if (raw.any { ch ->
                 ch.isLetter() && ch.lowercaseChar() !in 'а'..'я' && ch.lowercaseChar() != 'ё'
@@ -54,13 +61,29 @@ object RussianPronunciation {
         return normalized.split(' ').all { validWord.matches(it) }
     }
 
-    fun buildDictionary(raw: String): DictionarySpec {
+    fun buildDictionary(raw: String, officialLexicon: File? = null): DictionarySpec {
         val keyphrase = normalizePhrase(raw)
         require(keyphrase.isNotBlank()) { "Empty Russian keyphrase" }
-        val words = keyphrase.split(' ').distinct()
+        val phraseWords = keyphrase.split(' ')
+        val words = phraseWords.distinct()
+        val official = if (officialLexicon?.isFile == true) {
+            lookupOfficial(officialLexicon, words.toSet())
+        } else {
+            emptyMap()
+        }
+
+        var officialWordCount = 0
+        var fallbackWordCount = 0
         val lines = buildList {
             for (word in words) {
-                val variants = pronunciations(word)
+                val fromOfficial = official[word].orEmpty().distinct()
+                val variants = if (fromOfficial.isNotEmpty()) {
+                    officialWordCount++
+                    fromOfficial
+                } else {
+                    fallbackWordCount++
+                    pronunciations(word)
+                }
                 require(variants.isNotEmpty()) { "Cannot pronounce word: $word" }
                 variants.forEachIndexed { index, phones ->
                     val token = if (index == 0) word else "$word(${index + 1})"
@@ -68,9 +91,38 @@ object RussianPronunciation {
                 }
             }
         }
-        return DictionarySpec(keyphrase, lines)
+
+        return DictionarySpec(
+            keyphrase = keyphrase,
+            lines = lines,
+            officialWordCount = officialWordCount,
+            fallbackWordCount = fallbackWordCount,
+            wordCount = phraseWords.size,
+            syllableCount = keyphrase.count { vowelBase.containsKey(it) }
+        )
     }
 
+    /** Stream the compressed 545k-word lexicon only when the phrase changes. */
+    internal fun lookupOfficial(file: File, words: Set<String>): Map<String, List<String>> {
+        if (words.isEmpty()) return emptyMap()
+        val found = linkedMapOf<String, MutableList<String>>()
+        GZIPInputStream(file.inputStream().buffered()).bufferedReader(Charsets.UTF_8).useLines { sequence ->
+            sequence.forEach { rawLine ->
+                val line = rawLine.trim()
+                if (line.isEmpty()) return@forEach
+                val split = line.indexOfFirst { it.isWhitespace() }
+                if (split <= 0) return@forEach
+                val token = line.substring(0, split)
+                val base = token.substringBefore('(').lowercase(Locale.ROOT)
+                if (base !in words) return@forEach
+                val phones = line.substring(split).trim()
+                if (phones.isNotEmpty()) found.getOrPut(base) { mutableListOf() }.add(phones)
+            }
+        }
+        return found
+    }
+
+    /** Fallback only for words absent from the official dictionary. */
     internal fun pronunciations(word: String): List<String> {
         require(validWord.matches(word)) { "Unsupported Russian word: $word" }
         val yo = word.indices.filter { word[it] == 'ё' }
@@ -108,7 +160,6 @@ object RussianPronunciation {
                 val stressed = index == stressAt || ch == 'ё'
                 phones += vowel + if (stressed) "1" else "0"
             }
-            // ь and ъ only modify neighboring phones.
         }
         return phones.joinToString(" ")
     }
