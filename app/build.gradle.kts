@@ -10,8 +10,8 @@ android {
         applicationId = "dev.hotword.android"
         minSdk = 26
         targetSdk = 35
-        versionCode = 9
-        versionName = "0.5.0"
+        versionCode = 10
+        versionName = "0.5.1"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -35,7 +35,8 @@ val verifyPocketSphinxInputs by tasks.registering {
         val assetDir = file("src/main/assets/pocketsphinx/ru")
         val required = listOf(
             "feat.params", "feature_transform", "mdef", "means",
-            "mixture_weights", "noisedict", "transition_matrices", "variances"
+            "mixture_weights", "noisedict", "transition_matrices", "variances",
+            "ru.lexicon.gz"
         )
         check(required.all { file -> assetDir.resolve(file).isFile && assetDir.resolve(file).length() > 0L }) {
             "Missing PocketSphinx Russian acoustic files; run bash scripts/prepare-pocketsphinx.sh"
